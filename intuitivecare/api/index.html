@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Busca de Operadoras ANS</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+<div id="app">
+    <input type="text" v-model="query" placeholder="Buscar operadoras..." @input="buscar">
+    <div v-if="carregando">Carregando...</div>
+    <ul v-else>
+        <!-- Mensagem para resultados vazios -->
+        <li v-if="resultados.length === 0">Nenhum resultado encontrado.</li>
+        <!-- Resultados -->
+        <li v-for="item in resultados" :key="item.CNPJ">
+            {{ item.Razao_Social }} - {{ item.Nome_Fantasia }} ({{ item.Cidade }}/{{ item.UF }})
+        </li>
+    </ul>
+</div>
+
+<script>
+    const { createApp } = Vue;
+
+    createApp({
+        data() {
+            return {
+                query: '',
+                resultados: [],
+                carregando: false,
+                timeout: null
+            };
+        },
+        methods: {
+            buscar() {
+                clearTimeout(this.timeout);
+                this.timeout = setTimeout(async () => {
+                    if (!this.query) {
+                        this.resultados = [];
+                        return;
+                    }
+                    this.carregando = true;
+                    try {
+                        // Parâmetro "s" para busca geral (equivalente ao "q" anterior)
+                        const resposta = await axios.get('http://localhost:5001/search', {
+                            params: { s: this.query }  // Alterado de "q" para "s"
+                        });
+                        this.resultados = resposta.data;
+                    } catch (erro) {
+                        console.error('Erro na busca:', erro);
+                    }
+                    this.carregando = false;
+                }, 300);
+            }
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
