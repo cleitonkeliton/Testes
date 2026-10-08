@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+.vscode/
+artifacts/
+*.user
+*.suo
+*.log
+.env
+**/__pycache__/
+*.pyc

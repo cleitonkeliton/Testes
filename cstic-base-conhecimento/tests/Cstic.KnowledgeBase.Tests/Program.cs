@@ -1,0 +1,313 @@
+using System.IO.Compression;
+using System.Text;
+using System.Xml.Linq;
+using Cstic.KnowledgeBase.Models;
+using Cstic.KnowledgeBase.Services;
+
+var tests = new List<(string Name, Action Run)>();
+KnowledgeArticle Example() => new()
+{
+    Code = "0001", Title = "Manutenção preventiva de computador administrativo", Version = "1.0",
+    Author = "Técnico de exemplo", Approver = "Marcone Jose Roque Luna", Executor = "N2 / N1",
+    Objective = "Padronizar a manutenção preventiva de um computador de uso administrativo.",
+    Result = "Computador montado, com funcionamento verificado e eventuais defeitos registrados.",
+    Requirements = "Ferramentas e materiais autorizados pela instituição; instruções do fabricante.\nComputador administrativo desligado e desconectado da alimentação.",
+    Actions =
+    [
+        new() { Title = "Abrir computador", Steps = [
+            new() { Instruction = "Retirar os parafusos.", Details = ["Identificar e guardar os parafusos para a montagem."] },
+            new() { Instruction = "Retirar a tampa." }] },
+        new() { Title = "Limpeza", Steps = [
+            new() { Instruction = "Retirar os componentes necessários à limpeza." },
+            new() { Instruction = "Realizar a limpeza conforme as instruções do fabricante.", Details = ["Utilizar materiais autorizados pela instituição."] }] },
+        new() { Title = "Preventivas", Steps = [
+            new() { Instruction = "Verificar a necessidade de manutenção da pasta térmica." },
+            new() { Instruction = "Verificar o encaixe dos conectores." },
+            new() { Instruction = "Identificar itens defeituosos." }] },
+        new() { Title = "Montagem", Steps = [
+            new() { Instruction = "Recolocar todas as peças." },
+            new() { Instruction = "Fechar o gabinete." },
+            new() { Instruction = "Recolocar os parafusos." },
+            new() { Instruction = "Testar o funcionamento." }] }
+    ]
+};
+void Assert(bool condition, string message = "Assertion failed")
+{
+    if (!condition) throw new InvalidOperationException(message);
+}
+XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+XDocument ReadXml(ZipArchive archive, string path)
+{
+    using var stream = archive.GetEntry(path)!.Open();
+    return XDocument.Load(stream);
+}
+string Text(XDocument document) => string.Join(" ", document.Descendants(w + "t").Select(node => node.Value));
+var documents = new DocumentService(new FixedClock());
+tests.Add(("Documento válido", () => Assert(ArticleValidator.Validate(Example()).Count == 0)));
+tests.Add(("Obrigatórios rejeitam vazio e espaços", () =>
+{
+    var article = Example(); article.Title = " "; article.Author = "";
+    var errors = ArticleValidator.Validate(article);
+    Assert(errors.ContainsKey("title") && errors.ContainsKey("author"));
+}));
+tests.Add(("Nível e versão fora do formato", () =>
+{
+    var article = Example(); article.Executor = "N3"; article.Version = "abc";
+    var errors = ArticleValidator.Validate(article);
+    Assert(errors.ContainsKey("executor") && errors.ContainsKey("version"));
+}));
+tests.Add(("Nenhuma etapa e lista nula", () =>
+{
+    var article = Example(); article.Actions = [];
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions"));
+    article.Actions = null;
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions"));
+}));
+tests.Add(("Campos de etapa identificados pelo índice", () =>
+{
+    var article = Example(); article.Actions![0].Steps![1].Instruction = "";
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions[0].steps[1].instruction"));
+}));
+tests.Add(("Itens nulos não causam exceção", () =>
+{
+    var article = Example(); article.Actions![0].Steps![0] = null!;
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions[0].steps"));
+    article = Example(); article.Actions![0].Steps![0].Details = [null!];
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions[0].steps[0].details[0]"));
+}));
+tests.Add(("Limite de 100 etapas", () =>
+{
+    var article = Example(); article.Actions![0].Steps = Enumerable.Range(0, 101).Select(i => new ProcedureStep { Instruction = "Ação" }).ToList();
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions[0].steps"));
+}));
+tests.Add(("Limites de texto e detalhes", () =>
+{
+    var article = Example(); article.Actions![0].Steps![0].Instruction = new string('a', 501);
+    article.Actions![0].Steps![1].Details = Enumerable.Repeat("Detalhe", 21).ToList();
+    var errors = ArticleValidator.Validate(article);
+    Assert(errors.ContainsKey("actions[0].steps[0].instruction") && errors.ContainsKey("actions[0].steps[1].details"));
+}));
+tests.Add(("Caracteres de controle XML são rejeitados", () =>
+{
+    var article = Example(); article.Objective = "Texto\u0001inválido";
+    Assert(ArticleValidator.Validate(article).ContainsKey("objective"));
+}));
+tests.Add(("Detalhes opcionais podem ficar vazios", () =>
+{
+    var article = Example(); article.Actions![0].Steps![0].Details = ["", " "];
+    Assert(ArticleValidator.Validate(article).Count == 0);
+    Assert(documents.CreateWord(article).Length > 1000);
+}));
+tests.Add(("Modelo mantém cinco tabelas, cabeçalho e campos", () =>
+{
+    using var memory = new MemoryStream(documents.CreateWord(Example()));
+    using var zip = new ZipArchive(memory);
+    foreach (var entry in zip.Entries.Where(entry => entry.FullName.EndsWith(".xml")))
+        using (var stream = entry.Open()) XDocument.Load(stream);
+    var body = ReadXml(zip, "word/document.xml");
+    Assert(body.Root!.Element(w + "body")!.Elements(w + "tbl").Count() == 5);
+    Assert(Text(body).Contains("OBJETIVO") && Text(body).Contains("RESULTADO") && Text(body).Contains("REQUISITOS"));
+    var header = Text(ReadXml(zip, "word/header3.xml"));
+    Assert(header.Contains("PROCEDIMENTO OPERACIONAL PADRÃO - POP") && header.Contains("CSTIC"));
+    Assert(header.Contains("0001") && header.Contains("Técnico de exemplo") && header.Contains("Marcone Jose Roque Luna"));
+    Assert(!header.Contains("Assunto da base") && !header.Contains("Geração automatica"));
+}));
+tests.Add(("Data automática respeita Recife ao virar o dia UTC", () =>
+{
+    using var memory = new MemoryStream(documents.CreateWord(Example()));
+    using var zip = new ZipArchive(memory);
+    Assert(Text(ReadXml(zip, "word/header3.xml")).Contains("07/10/2026"));
+}));
+tests.Add(("Ações 1º a 4º e subetapas reiniciam em 1.1", () =>
+{
+    var article = Example();
+    using var memory = new MemoryStream(documents.CreateWord(article));
+    using var zip = new ZipArchive(memory);
+    var document = ReadXml(zip, "word/document.xml");
+    var paragraphs = document.Descendants(w + "p").Select(p => string.Concat(p.Descendants(w + "t").Select(t => t.Value))).ToArray();
+    for (var i = 1; i <= 4; i++) Assert(paragraphs.Any(p => p.StartsWith($"{i}º  ")));
+    Assert(paragraphs.Count(p => p.StartsWith("1.1  ")) == 4);
+    Assert(paragraphs.Count(p => p.StartsWith("1.2  ")) == 4);
+    Assert(paragraphs.Count(p => p.StartsWith("1.3  ")) == 2);
+    Assert(paragraphs.Count(p => p.StartsWith("1.4  ")) == 1);
+    var footer = ReadXml(zip, "word/footer3.xml");
+    Assert(Text(footer).Contains(article.Title));
+    Assert(footer.Descendants(w + "instrText").Any(node => node.Value.Contains("PAGE")));
+}));
+tests.Add(("Símbolos, acentos e quebras de linha permanecem texto", () =>
+{
+    var article = Example(); article.Objective = "Ação <script> & teste\nOutra linha";
+    using var memory = new MemoryStream(documents.CreateWord(article));
+    using var zip = new ZipArchive(memory);
+    var xml = ReadXml(zip, "word/document.xml");
+    Assert(Text(xml).Contains("Ação <script> & teste"));
+    Assert(xml.Descendants(w + "br").Any());
+    Assert(!xml.Descendants().Any(node => node.Name.LocalName == "script"));
+}));
+tests.Add(("Arquivo sem caminhos ou caracteres impróprios", () =>
+{
+    var article = Example(); article.Code = "CSTIC/0001"; article.Title = "Ação de impressão";
+    var filename = DocumentService.FileName(article);
+    Assert(filename == "POP_CSTIC_0001_Acao_de_impressao.docx", filename);
+}));
+tests.Add(("Documentos simultâneos não compartilham preenchimento", () =>
+{
+    Parallel.For(0, 12, index =>
+    {
+        var article = Example(); article.Title = $"Documento {index:D2}";
+        using var memory = new MemoryStream(documents.CreateWord(article));
+        using var zip = new ZipArchive(memory);
+        Assert(Text(ReadXml(zip, "word/header3.xml")).Contains(article.Title));
+    });
+}));
+
+tests.Add(("Ação vazia, ação nula e subetapas vazias são rejeitadas", () =>
+{
+    var article = Example(); article.Actions![0].Title = " ";
+    article.Actions[1].Steps = [];
+    article.Actions[2] = null!;
+    var errors = ArticleValidator.Validate(article);
+    Assert(errors.ContainsKey("actions[0].title") && errors.ContainsKey("actions[1].steps") && errors.ContainsKey("actions"));
+}));
+tests.Add(("Limite de 20 ações e 100 subetapas somadas", () =>
+{
+    var article = Example();
+    article.Actions = Enumerable.Range(0, 21).Select(i => new ProcedureAction { Title = "Ação", Steps = [new() { Instruction = "Subetapa" }] }).ToList();
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions"));
+    article.Actions = Enumerable.Range(0, 2).Select(i => new ProcedureAction { Title = "Ação", Steps = Enumerable.Range(0, 51).Select(j => new ProcedureStep { Instruction = "Subetapa" }).ToList() }).ToList();
+    Assert(ArticleValidator.Validate(article).ContainsKey("actions"));
+}));
+
+
+var importer = new DocumentImportService();
+byte[] ChangePart(byte[] original, string path, Func<XDocument, XDocument> change)
+{
+    using var buffer = new MemoryStream(); buffer.Write(original); buffer.Position = 0;
+    using (var zip = new ZipArchive(buffer, ZipArchiveMode.Update, leaveOpen: true))
+    {
+        var xml = ReadXml(zip, path); zip.GetEntry(path)!.Delete();
+        using var stream = zip.CreateEntry(path).Open(); change(xml).Save(stream);
+    }
+    return buffer.ToArray();
+}
+void Rejected(byte[] bytes)
+{
+    try { importer.Import(bytes); }
+    catch (DocumentImportException) { return; }
+    throw new InvalidOperationException("Arquivo deveria ser rejeitado");
+}
+tests.Add(("Importação preserva todos os campos, ações, subetapas e detalhes", () =>
+{
+    var source = Example(); var imported = importer.Import(documents.CreateWord(source));
+    Assert(System.Text.Json.JsonSerializer.Serialize(source) == System.Text.Json.JsonSerializer.Serialize(imported.Article));
+    Assert(imported.OriginalDate == "07/10/2026" && imported.Warnings.Count == 0);
+}));
+tests.Add(("Revisão, exportação e reimportação preservam edição", () =>
+{
+    var article = importer.Import(documents.CreateWord(Example())).Article;
+    article.Title = "Base revisada"; article.Version = "1.1";
+    article.Actions![1].Steps!.Add(new() { Instruction = "Nova instrução", Details = ["Detalhe novo"] });
+    var reviewed = importer.Import(documents.CreateWord(article)).Article;
+    Assert(reviewed.Title == "Base revisada" && reviewed.Version == "1.1");
+    Assert(reviewed.Actions![1].Steps![2].Instruction == "Nova instrução");
+    Assert(reviewed.Actions[1].Steps![2].Details![0] == "Detalhe novo");
+}));
+tests.Add(("Importação conserva quebras de linha e texto com símbolos", () =>
+{
+    var article = Example(); article.Objective = "Ação <script> & teste\nLinha 2";
+    article.Actions![0].Title = "Abrir\ncomputador";
+    article.Actions[0].Steps![0].Instruction = "Retirar\nos parafusos";
+    article.Actions[0].Steps![0].Details = ["Linha 1\nLinha 2"];
+    var result = importer.Import(documents.CreateWord(article)).Article;
+    Assert(result.Objective == article.Objective);
+    Assert(result.Actions![0].Title == article.Actions[0].Title);
+    Assert(result.Actions[0].Steps![0].Instruction == article.Actions[0].Steps![0].Instruction);
+    Assert(result.Actions[0].Steps![0].Details![0] == "Linha 1\nLinha 2");
+}));
+tests.Add(("Modelo original vazio pode ser carregado para completar", () =>
+{
+    using var resource = typeof(DocumentService).Assembly.GetManifestResourceStream("Cstic.KnowledgeBase.Templates.POP_BasedeConhecimento_CSTIC.docx")!;
+    using var memory = new MemoryStream(); resource.CopyTo(memory);
+    var result = importer.Import(memory.ToArray());
+    Assert(result.Article.Title == "" && result.Article.Version == "1.0" && result.Warnings.Count > 0);
+}));
+tests.Add(("Numeração automática antiga é preservada e solicita conferência", () =>
+{
+    var bytes = ChangePart(documents.CreateWord(Example()), "word/document.xml", xml =>
+    {
+        var cell = xml.Root!.Element(w + "body")!.Elements(w + "tbl").Last().Elements(w + "tr").Last().Element(w + "tc")!;
+        cell.Elements(w + "p").Remove();
+        cell.Add(new XElement(w + "p", new XElement(w + "pPr", new XElement(w + "numPr", new XElement(w + "ilvl", new XAttribute(w + "val", "0")), new XElement(w + "numId", new XAttribute(w + "val", "3")))), new XElement(w + "r", new XElement(w + "t", "Primeiro passo"))));
+        cell.Add(new XElement(w + "p", new XElement(w + "pPr", new XElement(w + "numPr", new XElement(w + "ilvl", new XAttribute(w + "val", "1")), new XElement(w + "numId", new XAttribute(w + "val", "3")))), new XElement(w + "r", new XElement(w + "t", "Cuidado adicional"))));
+        return xml;
+    });
+    var result = importer.Import(bytes);
+    Assert(result.Article.Actions![0].Steps![0].Instruction == "Primeiro passo");
+    Assert(result.Article.Actions[0].Steps![0].Details![0] == "Cuidado adicional" && result.Warnings.Count > 0);
+}));
+tests.Add(("Arquivo inválido, vazio e maior que 2 MB rejeitados", () =>
+{
+    Rejected(Encoding.UTF8.GetBytes("%PDF-1.7")); Rejected([]); Rejected(new byte[DocumentImportService.MaxFileBytes + 1]);
+}));
+tests.Add(("Word fora do modelo CSTIC é rejeitado", () =>
+{
+    Rejected(ChangePart(documents.CreateWord(Example()), "word/document.xml", xml => { xml.Descendants(w + "tbl").First().Remove(); return xml; }));
+}));
+tests.Add(("Imagens e alterações controladas não são descartadas silenciosamente", () =>
+{
+    foreach (var name in new[] { "drawing", "ins" })
+        Rejected(ChangePart(documents.CreateWord(Example()), "word/document.xml", xml => { xml.Descendants(w + "tc").First().Add(new XElement(w + name)); return xml; }));
+}));
+tests.Add(("Textos acima dos limites são rejeitados sem cortar conteúdo", () =>
+{
+    Rejected(ChangePart(documents.CreateWord(Example()), "word/document.xml", xml =>
+    {
+        xml.Root!.Element(w + "body")!.Elements(w + "tbl").First().Elements(w + "tr").Last().Descendants(w + "t").First().Value = new string('a', 5001);
+        return xml;
+    }));
+}));
+tests.Add(("ZIP com entrada duplicada é rejeitado", () =>
+{
+    using var memory = new MemoryStream(); memory.Write(documents.CreateWord(Example())); memory.Position = 0;
+    using (var zip = new ZipArchive(memory, ZipArchiveMode.Update, leaveOpen: true))
+        using (var stream = zip.CreateEntry("word/document.xml").Open()) stream.Write(Encoding.UTF8.GetBytes("<x/>"));
+    Rejected(memory.ToArray());
+}));
+tests.Add(("XML com DTD é rejeitado sem resolver conteúdo externo", () =>
+{
+    using var memory = new MemoryStream(); memory.Write(documents.CreateWord(Example())); memory.Position = 0;
+    using (var zip = new ZipArchive(memory, ZipArchiveMode.Update, leaveOpen: true))
+    {
+        zip.GetEntry("word/document.xml")!.Delete();
+        using var stream = zip.CreateEntry("word/document.xml").Open();
+        stream.Write(Encoding.UTF8.GetBytes("<!DOCTYPE x [<!ENTITY external SYSTEM 'file:///etc/passwd'>]><x>&external;</x>"));
+    }
+    Rejected(memory.ToArray());
+}));
+tests.Add(("Documento expandido acima do limite é rejeitado", () =>
+{
+    using var memory = new MemoryStream(); memory.Write(documents.CreateWord(Example())); memory.Position = 0;
+    using (var zip = new ZipArchive(memory, ZipArchiveMode.Update, leaveOpen: true))
+        using (var stream = zip.CreateEntry("extra.bin", CompressionLevel.Optimal).Open()) stream.Write(new byte[13 * 1024 * 1024]);
+    Rejected(memory.ToArray());
+}));
+
+var failures = 0;
+foreach (var test in tests)
+{
+    try { test.Run(); Console.WriteLine($"PASS {test.Name}"); }
+    catch (Exception exception) { failures++; Console.Error.WriteLine($"FAIL {test.Name}: {exception.Message}"); }
+}
+Console.WriteLine($"{tests.Count - failures}/{tests.Count} verificações passaram.");
+if (args.Length == 2 && args[0] == "--example")
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(args[1]))!);
+    File.WriteAllBytes(args[1], new DocumentService(TimeProvider.System).CreateWord(Example()));
+    Console.WriteLine($"Exemplo salvo: {args[1]}");
+}
+return failures == 0 ? 0 : 1;
+
+internal sealed class FixedClock : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => new(2026, 10, 8, 1, 30, 0, TimeSpan.Zero);
+}
