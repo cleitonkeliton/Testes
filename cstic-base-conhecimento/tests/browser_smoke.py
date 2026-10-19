@@ -141,6 +141,10 @@ with sync_playwright() as playwright:
     response = context.request.post(endpoint, form={"Payload": json.dumps(long), "__RequestVerificationToken": token})
     check(response.status == 200, "Documento longo de 80 subetapas gerado")
     (output / "POP_longo.docx").write_bytes(response.body())
+    oversized = copy.deepcopy(payload)
+    oversized["objective"] = "a" * 180_001
+    response = context.request.post(endpoint, form={"Payload": json.dumps(oversized), "__RequestVerificationToken": token})
+    check(response.status == 400 and "180.000" in response.json()["message"], "Limite total do POP informado pelo servidor")
 
     page.evaluate("window.scrollTo(0, 0)")
     page.screenshot(path=str(output / "interface-desktop.png"))
@@ -148,6 +152,20 @@ with sync_playwright() as playwright:
     page.evaluate("window.scrollTo(0, 0)")
     check(page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Tela de celular sem rolagem horizontal")
     page.screenshot(path=str(output / "interface-mobile.png"))
+
+    requests = []
+    page.on("request", lambda request: requests.append(request.url) if "handler=Generate" in request.url else None)
+    page.evaluate("""() => {
+        for (const step of document.querySelectorAll('.procedure-step')) {
+            const button = step.querySelector('[data-action="add-detail"]');
+            while (!button.disabled) button.click();
+            step.querySelectorAll('.detail-text').forEach(input => input.value = 'x'.repeat(900));
+        }
+        document.getElementById('article-form').dispatchEvent(new Event('input'));
+    }""")
+    page.locator("#generate-document").click()
+    check("excede o limite total" in page.locator("#form-message").inner_text() and not requests, "POP acima do limite total bloqueado no navegador com aviso")
+    page.locator("#fill-example").click()
 
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(args.url.rstrip("/") + "/validar")
@@ -205,7 +223,20 @@ with sync_playwright() as playwright:
     page.evaluate("window.scrollTo(0, 0)")
     check(page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Revisão no celular sem rolagem horizontal")
     page.screenshot(path=str(output / "interface-validacao-mobile.png"))
+    with ZipFile(downloaded) as source:
+        unusual = io.BytesIO()
+        with ZipFile(unusual, "w") as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename == "word/document.xml":
+                    data = data.replace(b">N2 / N1<", b">N3<", 1)
+                target.writestr(item, data)
+    page.locator("#existing-file").set_input_files({"name": "executor.docx", "mimeType": "application/octet-stream", "buffer": unusual.getvalue()})
+    with page.expect_response(lambda response: "handler=Import" in response.url):
+        page.locator("#import-document").click()
+    check(page.locator("#executor [data-imported]").count() == 1, "Executor fora do padrão aparece para correção")
     page.locator("#clear-form").click()
+    check(page.locator("#executor [data-imported]").count() == 0, "Limpar revisão remove executor importado")
     check(page.locator("#editor-layout").is_hidden() and page.locator("#existing-file").input_value() == "", "Limpar revisão permite carregar outra base")
     page.goto(args.url)
     check(page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Página inicial no celular sem rolagem horizontal")

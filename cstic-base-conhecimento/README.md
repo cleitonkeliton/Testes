@@ -136,7 +136,7 @@ mais simples. Brave é um navegador e também pode acessar esta aplicação.
 dotnet run --project tests/Cstic.KnowledgeBase.Tests -c Release
 ```
 
-São **30 verificações** de validação, geração/importação do Word, numeração, data e isolamento
+São **32 verificações** de validação, geração/importação do Word, numeração, data e isolamento
 entre documentos simultâneos. O executável retorna código diferente de zero se
 uma verificação falhar.
 
@@ -148,7 +148,7 @@ python -m playwright install chromium
 python tests/browser_smoke.py --url http://localhost:5080
 ```
 
-Esse teste executa **70 verificações funcionais** e grava resultados em
+Esse teste executa **74 verificações funcionais** e grava resultados em
 `artifacts/browser`, uma pasta ignorada pelo Git. Python/Playwright não são
 necessários para executar a aplicação.
 
@@ -160,7 +160,7 @@ O servidor não exige conversor PDF. Em `docs/exemplos` há Word e PDF demonstra
 
 ## Limites desta versão
 
-- Até 20 ações, 100 subetapas no total e 20 detalhes por subetapa.
+- Até 20 ações, 100 subetapas no total, 20 detalhes por subetapa e 180.000 caracteres no POP inteiro.
 - Limites de tamanho de textos e solicitação; validação também no servidor.
 - Sem anexar imagens, cadastro de técnicos ou aprovação digital.
 - Importação restrita a `.docx` de texto no modelo CSTIC, até 2 MB.

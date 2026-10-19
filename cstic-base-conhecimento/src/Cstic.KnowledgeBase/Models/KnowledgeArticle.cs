@@ -17,23 +17,23 @@ public sealed class KnowledgeArticle
     public string Version { get; set; } = "1.0";
 
     [Required(ErrorMessage = "Informe o nome do técnico autor.")]
-    [StringLength(120)]
+    [StringLength(120, ErrorMessage = "O nome do autor deve ter até 120 caracteres.")]
     public string Author { get; set; } = "";
 
     [Required(ErrorMessage = "Informe o nome do aprovador.")]
-    [StringLength(120)]
+    [StringLength(120, ErrorMessage = "O nome do aprovador deve ter até 120 caracteres.")]
     public string Approver { get; set; } = "Marcone Jose Roque Luna";
 
     [Required(ErrorMessage = "Descreva o objetivo do procedimento.")]
-    [StringLength(5000)]
+    [StringLength(5000, ErrorMessage = "O objetivo deve ter até 5.000 caracteres.")]
     public string Objective { get; set; } = "";
 
     [Required(ErrorMessage = "Descreva o resultado esperado.")]
-    [StringLength(5000)]
+    [StringLength(5000, ErrorMessage = "O resultado deve ter até 5.000 caracteres.")]
     public string Result { get; set; } = "";
 
     [Required(ErrorMessage = "Informe os requisitos ou escreva Não se aplica.")]
-    [StringLength(5000)]
+    [StringLength(5000, ErrorMessage = "Os requisitos devem ter até 5.000 caracteres.")]
     public string Requirements { get; set; } = "";
 
     [Required(ErrorMessage = "Selecione o executor.")]

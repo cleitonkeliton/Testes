@@ -44,8 +44,10 @@ public sealed class EditorModel(DocumentService documents, DocumentImportService
 
     public IActionResult OnPostGenerate()
     {
-        if (string.IsNullOrWhiteSpace(Payload) || Payload.Length > 180_000)
-            return Invalid("O formulário está vazio ou excede o limite de tamanho.");
+        if (string.IsNullOrWhiteSpace(Payload))
+            return Invalid("Preencha o formulário antes de gerar o documento.");
+        if (Payload.Length > ArticleValidator.MaxPayloadLength)
+            return Invalid(ArticleValidator.PayloadTooLongMessage);
         KnowledgeArticle? article;
         try { article = JsonSerializer.Deserialize<KnowledgeArticle>(Payload, JsonOptions); }
         catch (JsonException) { return Invalid("Não foi possível ler o formulário. Recarregue a página e tente novamente."); }

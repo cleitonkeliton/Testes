@@ -63,6 +63,12 @@ tests.Add(("Nenhuma etapa e lista nula", () =>
     article.Actions = null;
     Assert(ArticleValidator.Validate(article).ContainsKey("actions"));
 }));
+tests.Add(("Limites de tamanho têm mensagens em português", () =>
+{
+    var article = Example(); article.Author = new string('a', 121); article.Objective = new string('a', 5001);
+    var errors = ArticleValidator.Validate(article);
+    Assert(errors["author"].Single().Contains("120 caracteres") && errors["objective"].Single().Contains("5.000 caracteres"));
+}));
 tests.Add(("Campos de etapa identificados pelo índice", () =>
 {
     var article = Example(); article.Actions![0].Steps![1].Instruction = "";
@@ -265,6 +271,21 @@ tests.Add(("Textos acima dos limites são rejeitados sem cortar conteúdo", () =
         xml.Root!.Element(w + "body")!.Elements(w + "tbl").First().Elements(w + "tr").Last().Descendants(w + "t").First().Value = new string('a', 5001);
         return xml;
     }));
+}));
+tests.Add(("Importação rejeita POP maior que o limite de geração", () =>
+{
+    var article = Example();
+    article.Actions = Enumerable.Range(0, 20).Select(i => new ProcedureAction
+    {
+        Title = $"Ação {i}",
+        Steps = Enumerable.Range(0, 5).Select(j => new ProcedureStep
+            { Instruction = $"Subetapa {j}", Details = [new string('á', 900), new string('b', 900)] }).ToList()
+    }).ToList();
+    Assert(ArticleValidator.Validate(article).Count == 0, "Cada campo deve respeitar seu limite individual");
+    Assert(ArticleValidator.PayloadLength(article) > ArticleValidator.MaxPayloadLength);
+    try { importer.Import(documents.CreateWord(article)); }
+    catch (DocumentImportException exception) { Assert(exception.Message.Contains("180.000")); return; }
+    throw new InvalidOperationException("POP acima do limite deveria ser rejeitado na importação");
 }));
 tests.Add(("ZIP com entrada duplicada é rejeitado", () =>
 {

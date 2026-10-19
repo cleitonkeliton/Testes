@@ -62,7 +62,8 @@ recebe 400; erros de campos recebem mensagens identificadas pelo caminho
 
 Limites: 20 ações, 100 subetapas somadas, 20 detalhes por subetapa, nome 160,
 ação 200, subetapa 500, detalhe 2.000, blocos de texto 5.000 caracteres.
-Payload JSON: até 180.000 caracteres; corpo HTTP: até 2.162.688 bytes, incluindo os uploads.
+Payload JSON: até 180.000 caracteres no total, conferido no navegador, na geração e também
+na importação (um POP que não poderia ser gerado é recusado ao carregar); corpo HTTP: até 2.162.688 bytes, incluindo os uploads.
 
 O nome do arquivo é normalizado, sem caminhos e limitado em tamanho.
 A geração de documentos é independente por solicitação; o template original

@@ -175,6 +175,8 @@ public sealed class DocumentImportService
                 foreach (var detail in step.Details) Limit(detail, 2000);
             }
         }
+        if (ArticleValidator.PayloadLength(article) > ArticleValidator.MaxPayloadLength)
+            throw new DocumentImportException(ArticleValidator.PayloadTooLongMessage + " Nenhum conteúdo foi cortado.");
     }
 
     private static XDocument Xml(ZipArchive zip, string path)

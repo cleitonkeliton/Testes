@@ -47,7 +47,7 @@
             </section>
         }
         <div id="editor-layout" class="editor-layout" hidden="@Model.IsReview">
-            <form id="article-form" class="article-form" method="post" asp-page-handler="Generate" asp-antiforgery="true">
+            <form id="article-form" class="article-form" method="post" asp-page-handler="Generate" asp-antiforgery="true" data-max-payload="@Cstic.KnowledgeBase.Services.ArticleValidator.MaxPayloadLength">
                 <noscript><p class="notice error">Ative o JavaScript do navegador para adicionar etapas e gerar o documento.</p></noscript>
                 <div id="form-message" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
                 <div class="form-meta"><span><span class="required-star">*</span> Campos obrigatórios</span><span>@(Model.IsReview ? "Confira também o autor, aprovador e versão" : "Data preenchida automaticamente")</span></div>

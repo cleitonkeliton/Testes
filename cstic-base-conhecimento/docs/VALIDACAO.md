@@ -11,8 +11,8 @@ O SDK foi baixado da Microsoft e verificado pelo SHA-512 dos metadados oficiais.
 | Verificação | Resultado |
 |---|---|
 | Build Release | Passou; zero erros e zero avisos de compilação. |
-| Executável de testes C# | 30 de 30 verificações passaram. |
-| Teste real de navegador/HTTP | 70 de 70 verificações passaram. |
+| Executável de testes C# | 32 de 32 verificações passaram. |
+| Teste real de navegador/HTTP | 74 de 74 verificações passaram. |
 | Download pelo navegador | `.docx` válido, com conteúdo preenchido e rodapé dinâmico. |
 | Importação e revisão | Campos, ações/subetapas/detalhes preservados; edição e novo download conferidos. |
 | Rejeição de uploads | Arquivo inválido, formato/modelo incorreto, texto/ZIP excessivo, DTD, duplicatas, imagens e alterações controladas rejeitados. |

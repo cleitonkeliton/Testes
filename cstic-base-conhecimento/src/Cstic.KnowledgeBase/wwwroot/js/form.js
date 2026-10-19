@@ -242,6 +242,7 @@
     document.getElementById("clear-form").addEventListener("click", () => {
         if (busy) return;
         if (!window.confirm("Limpar todos os campos? Os dados preenchidos serão descartados.")) return;
+        document.querySelectorAll("#executor [data-imported]").forEach(option => option.remove());
         form.reset();
         actionsList.replaceChildren();
         addAction();
@@ -363,8 +364,14 @@
         clearErrors();
         if (!form.reportValidity()) return;
         const snapshot = payload();
+        const json = JSON.stringify(snapshot);
+        const maxPayload = Number(form.dataset.maxPayload);
+        if (json.length > maxPayload) {
+            notify(`O POP excede o limite total de ${maxPayload.toLocaleString("pt-BR")} caracteres (atual: ${json.length.toLocaleString("pt-BR")}). Reduza os textos ou divida o conteúdo em mais de um POP.`, true);
+            return;
+        }
         const data = new FormData();
-        data.set("Payload", JSON.stringify(snapshot));
+        data.set("Payload", json);
         data.set("__RequestVerificationToken", form.querySelector('[name="__RequestVerificationToken"]').value);
         busy = true;
         generateButton.disabled = true;
