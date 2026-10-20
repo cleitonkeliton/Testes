@@ -1,0 +1,41 @@
+@page "/admin/pops"
+@model AdminPopsModel
+@{
+    ViewData["Title"] = "POPs recebidos";
+    ViewData["Nav"] = "recebidos";
+    (string Key, string Label)[] filters = [("aguardando", "Aguardando validação"), ("devolvidos", "Devolvidos"), ("validados", "Validados"), ("rascunhos", "Rascunhos"), ("todos", "Todos")];
+}
+<section class="hero">
+    <div><p class="eyebrow">ADMINISTRAÇÃO</p><h1>POPs recebidos</h1><p class="hero-description">Abra um POP para conferir o conteúdo e validar ou devolver ao técnico com orientações.</p></div>
+</section>
+<nav class="filter-tabs" aria-label="Filtrar por situação">
+    @foreach (var filter in filters)
+    {
+        <a href="/admin/pops?situacao=@filter.Key" aria-current="@(Model.Filter == filter.Key ? "page" : null)">@filter.Label</a>
+    }
+</nav>
+@if (Model.Pops.Count == 0)
+{
+    <div class="panel empty-state"><h2>Nada por aqui</h2><p>@(Model.Filter == "aguardando" ? "Nenhum POP aguardando validação." : "Nenhum POP nesta situação.")</p></div>
+}
+else
+{
+    <div class="panel table-panel">
+        <table class="data-table">
+            <thead><tr><th scope="col">Técnico</th><th scope="col">POP</th><th scope="col">Nº / versão</th><th scope="col">Situação</th><th scope="col">@(Model.Filter == "aguardando" ? "Enviado em" : "Atualizado")</th><th scope="col"><span class="visually-hidden">Ações</span></th></tr></thead>
+            <tbody>
+                @foreach (var pop in Model.Pops)
+                {
+                    <tr>
+                        <td><strong>@pop.Author.FullName</strong><small class="cell-note">@pop.Author.Function</small></td>
+                        <td><a href="/pops/@pop.Id">@(string.IsNullOrWhiteSpace(pop.Title) ? "(sem nome)" : pop.Title)</a></td>
+                        <td>@(pop.Code ?? "—") / @(pop.Status == PopStatus.Enviado ? PopService.NextVersion(pop.Version) : pop.Version ?? "—")</td>
+                        <td><partial name="_StatusBadge" model="pop" /></td>
+                        <td>@Dates.Format(Model.Filter == "aguardando" ? pop.SubmittedUtc : pop.UpdatedUtc)</td>
+                        <td class="row-actions"><a href="/pops/@pop.Id">@(pop.Status == PopStatus.Enviado ? "Analisar" : "Ver")</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

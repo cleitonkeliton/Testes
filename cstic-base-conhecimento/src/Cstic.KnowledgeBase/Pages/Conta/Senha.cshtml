@@ -1,0 +1,28 @@
+@page "/conta/senha"
+@model SenhaModel
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Alterar senha";
+}
+<section class="auth-card" aria-labelledby="password-title">
+    <p class="eyebrow">@(Model.Required ? "PRIMEIRO ACESSO" : "SUA CONTA")</p>
+    <h1 id="password-title">@(Model.Required ? "Defina sua senha" : "Alterar senha")</h1>
+    <p class="hero-description">@(Model.Required ? "Sua senha atual é temporária. Escolha uma nova senha para continuar." : $"Conectado como {Model.Login}.")</p>
+    @if (Model.Error is not null)
+    {
+        <div class="notice error" role="alert">@Model.Error</div>
+    }
+    <form method="post" class="auth-form">
+        <div class="field"><label for="current">Senha atual</label><input id="current" name="current" type="password" required maxlength="128" autocomplete="current-password" autofocus></div>
+        <div class="field"><label for="password">Nova senha</label><input id="password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password" aria-describedby="password-help"><small id="password-help">Mínimo de 10 caracteres, com letra e número, sem conter o login.</small></div>
+        <div class="field"><label for="confirmation">Confirmar nova senha</label><input id="confirmation" name="confirmation" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></div>
+        <button class="button primary" type="submit">Salvar nova senha</button>
+    </form>
+    <div class="auth-switch">
+        @if (!Model.Required)
+        {
+            <a href="/">Voltar</a>
+        }
+        <form method="post" asp-page="/Sair" class="inline-form"><button type="submit" class="link-button">Sair</button></form>
+    </div>
+</section>

@@ -10,3 +10,4 @@ artifacts/
 .env
 **/__pycache__/
 *.pyc
+**/App_Data/

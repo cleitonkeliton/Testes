@@ -1,19 +1,75 @@
 "use strict";
 
 (() => {
+    // Lets the server answer with a status code (401/403) instead of redirecting to the login page.
+    const fetchHeaders = { "X-Cstic-Fetch": "1" };
+    let busy = false;
+
+    function statusMessage(status) {
+        if (status === 401) return "Sua sessão expirou. Entre novamente em outra aba (endereço /entrar) e tente de novo; seus campos continuam preenchidos.";
+        if (status === 403) return "Sem permissão para esta ação. Se o administrador redefiniu sua senha, entre novamente em outra aba e troque a senha.";
+        if (status === 413) return "O conteúdo ficou muito extenso. Reduza o texto e tente novamente.";
+        if (status === 429) return "Muitas solicitações. Aguarde um minuto e tente novamente.";
+        return null;
+    }
+
+    async function readJson(response) {
+        return response.headers.get("content-type")?.includes("application/json") ? await response.json() : null;
+    }
+
+    const importForm = document.getElementById("import-form");
+    if (importForm) {
+        const importButton = document.getElementById("import-document");
+        const fileInput = document.getElementById("existing-file");
+        const importMessage = document.getElementById("import-message");
+        const importNotice = (text, error = false) => {
+            importMessage.textContent = text;
+            importMessage.className = error ? "notice error" : "notice";
+            importMessage.setAttribute("role", error ? "alert" : "status");
+            importMessage.hidden = false;
+            importMessage.focus();
+        };
+        importForm.addEventListener("submit", async event => {
+            event.preventDefault();
+            if (busy) return;
+            const file = fileInput.files[0];
+            if (!file) { importNotice("Selecione o arquivo Word que deseja validar.", true); return; }
+            if (!file.name.toLowerCase().endsWith(".docx")) {
+                importNotice("Envie um arquivo .docx no modelo CSTIC. PDF e .doc não são aceitos.", true); return;
+            }
+            if (file.size > 2 * 1024 * 1024) { importNotice("O arquivo deve ter no máximo 2 MB.", true); return; }
+            busy = true;
+            importButton.disabled = true;
+            importButton.textContent = "Lendo documento…";
+            try {
+                const response = await fetch(importForm.action, { method: "POST", body: new FormData(importForm), credentials: "same-origin", headers: fetchHeaders });
+                const info = await readJson(response);
+                if (!response.ok) {
+                    importNotice(info?.message || statusMessage(response.status) || "Não foi possível importar. Recarregue a página e tente novamente.", true);
+                    return;
+                }
+                window.location.assign(info.redirect);
+            } catch {
+                importNotice("Não foi possível enviar o arquivo. Confira a conexão e tente novamente.", true);
+            } finally {
+                busy = false;
+                importButton.disabled = false;
+                importButton.textContent = "Carregar para revisão";
+            }
+        });
+    }
+
     const form = document.getElementById("article-form");
+    if (!form) return;
     const actionsList = document.getElementById("actions-list");
     const message = document.getElementById("form-message");
-    const generateButton = document.getElementById("generate-document");
-    const reviewMode = document.body.dataset.mode === "validar";
-    const editorLayout = document.getElementById("editor-layout");
-    const importButton = document.getElementById("import-document");
-    const fileInput = document.getElementById("existing-file");
-    const importMessage = document.getElementById("import-message");
-    const generateLabel = reviewMode ? "Gerar base revisada" : "Gerar documento Word";
+    const submitButton = document.getElementById("generate-document");
+    const saveButton = document.getElementById("save-draft");
+    const downloadButton = document.getElementById("download-word");
+    const maxPayload = Number(form.dataset.maxPayload);
+    let popId = form.dataset.popId || null;
     let sequence = 0;
     let edited = false;
-    let busy = false;
     const actions = () => [...actionsList.querySelectorAll(":scope > .procedure-action")];
     const steps = action => [...(action || actionsList).querySelectorAll(action ? ":scope > .action-steps > .procedure-step" : ".procedure-step")];
 
@@ -116,10 +172,8 @@
         document.getElementById("step-counter").textContent = `${current.length} ${current.length === 1 ? "ação" : "ações"}`;
         document.getElementById("summary-steps").textContent = `${String(current.length).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
         const title = document.getElementById("title").value.trim();
-        const code = document.getElementById("code").value.trim();
         const executor = document.getElementById("executor").value;
         document.getElementById("summary-title").textContent = title || "Novo procedimento";
-        document.getElementById("summary-code").textContent = code ? `POP Nº ${code} · Versão ${document.getElementById("version").value || "—"}` : "O título e o número aparecem aqui.";
         document.getElementById("summary-executor").textContent = executor;
         document.getElementById("executor-summary").textContent = `${executor}, conforme selecionado na identificação.`;
         const required = [...form.querySelectorAll("[required]")];
@@ -128,6 +182,20 @@
         document.getElementById("form-progress").value = percentage;
         document.getElementById("progress-percentage").textContent = `${percentage}%`;
         document.getElementById("progress-description").textContent = `${complete} de ${required.length} campos obrigatórios preenchidos.`;
+    }
+
+    function fill(article) {
+        const executor = document.getElementById("executor");
+        executor.querySelectorAll("[data-imported]").forEach(option => option.remove());
+        if (article.executor && ![...executor.options].some(option => option.value === article.executor)) {
+            const option = new Option(`${article.executor} — selecione N1 ou N2`, article.executor);
+            option.dataset.imported = "true";
+            executor.add(option);
+        }
+        form.querySelectorAll("[name][data-path]").forEach(input => input.value = article[input.name] ?? "");
+        actionsList.replaceChildren();
+        (article.actions || []).forEach(action => addAction(action.title, action.steps?.length ? action.steps : undefined));
+        if (!actions().length) addAction();
     }
 
     function payload() {
@@ -175,6 +243,55 @@
         }
         message.append(list);
         if (firstInput) firstInput.focus();
+    }
+
+    function serialized() {
+        const json = JSON.stringify(payload());
+        if (json.length > maxPayload) {
+            notify(`O POP excede o limite total de ${maxPayload.toLocaleString("pt-BR")} caracteres (atual: ${json.length.toLocaleString("pt-BR")}). Reduza os textos ou divida o conteúdo em mais de um POP.`, true);
+            return null;
+        }
+        return json;
+    }
+
+    function post(handler, json) {
+        const data = new FormData();
+        data.set("Payload", json);
+        data.set("__RequestVerificationToken", form.querySelector('[name="__RequestVerificationToken"]').value);
+        return fetch(`${window.location.pathname}?handler=${handler}`, { method: "POST", body: data, credentials: "same-origin", headers: fetchHeaders });
+    }
+
+    function remember(id) {
+        if (!id || String(id) === String(popId)) return;
+        popId = String(id);
+        form.dataset.popId = popId;
+        window.history.replaceState(null, "", `/pops/${popId}/editar`);
+    }
+
+    // Runs one request at a time and keeps the fields when it fails.
+    async function run(button, label, task) {
+        if (busy) return;
+        busy = true;
+        [submitButton, saveButton, downloadButton].forEach(item => item.disabled = true);
+        const text = button.querySelector("span") || button;
+        const original = text.textContent;
+        text.textContent = label;
+        try {
+            await task();
+        } catch {
+            notify("Não foi possível concluir. Confira sua conexão e tente novamente; seus campos continuam preenchidos.", true);
+        } finally {
+            busy = false;
+            [submitButton, saveButton, downloadButton].forEach(item => item.disabled = false);
+            text.textContent = original;
+        }
+    }
+
+    async function failure(response) {
+        const info = await readJson(response);
+        if (info?.id) remember(info.id);
+        if (info?.errors) showValidation(info);
+        else notify(info?.message || statusMessage(response.status) || "Não foi possível concluir. Tente novamente em instantes.", true);
     }
 
     form.addEventListener("input", () => {
@@ -247,85 +364,15 @@
         actionsList.replaceChildren();
         addAction();
         clearErrors();
-        edited = false;
+        edited = true;
         update();
-        if (reviewMode) {
-            editorLayout.hidden = true;
-            importMessage.hidden = true;
-            fileInput.value = "";
-            fileInput.focus();
-        } else document.getElementById("code").focus();
-    });
-
-    function importNotice(text, error = false) {
-        importMessage.textContent = text;
-        importMessage.className = error ? "notice error" : "notice";
-        importMessage.setAttribute("role", error ? "alert" : "status");
-        importMessage.hidden = false;
-        importMessage.focus();
-    }
-
-    importButton?.addEventListener("click", async () => {
-        if (busy) return;
-        const file = fileInput.files[0];
-        if (!file) { importNotice("Selecione o arquivo Word que deseja validar.", true); return; }
-        if (!file.name.toLowerCase().endsWith(".docx")) {
-            importNotice("Envie um arquivo .docx no modelo CSTIC. PDF e .doc não são aceitos.", true); return;
-        }
-        if (file.size > 2 * 1024 * 1024) { importNotice("O arquivo deve ter no máximo 2 MB.", true); return; }
-        if (edited && !window.confirm("Substituir a revisão atual pelo documento selecionado? As alterações não baixadas serão descartadas.")) return;
-        const data = new FormData();
-        data.set("UploadedFile", file);
-        data.set("__RequestVerificationToken", form.querySelector('[name="__RequestVerificationToken"]').value);
-        busy = true;
-        importButton.disabled = true;
-        generateButton.disabled = true;
-        importButton.textContent = "Lendo documento…";
-        try {
-            const response = await fetch("/validar?handler=Import", { method: "POST", body: data, credentials: "same-origin" });
-            if (!response.ok) {
-                const info = response.headers.get("content-type")?.includes("application/json") ? await response.json() : null;
-                importNotice(info?.message || (response.status === 413 ? "O arquivo deve ter no máximo 2 MB." : "Não foi possível importar. Recarregue a página se a sessão expirou e tente novamente."), true);
-                return;
-            }
-            const imported = await response.json();
-            const article = imported.article;
-            const executor = document.getElementById("executor");
-            executor.querySelectorAll("[data-imported]").forEach(option => option.remove());
-            if (![...executor.options].some(option => option.value === article.executor)) {
-                const option = new Option(`${article.executor || "Não informado"} — selecione N1 ou N2`, article.executor);
-                option.dataset.imported = "true";
-                executor.add(option);
-            }
-            form.querySelectorAll("[name][data-path]").forEach(input => input.value = article[input.name] ?? "");
-            actionsList.replaceChildren();
-            article.actions.forEach(action => addAction(action.title, action.steps));
-            clearErrors();
-            editorLayout.hidden = false;
-            edited = false;
-            update();
-            const date = imported.originalDate ? ` Data no arquivo: ${imported.originalDate}.` : "";
-            importNotice(`Arquivo carregado: ${imported.fileName}.${date} Confira todos os campos, incluindo autor, aprovador e versão. ${imported.warnings.join(" ")}`);
-            document.getElementById("identificacao").scrollIntoView({ behavior: "smooth", block: "start" });
-            document.getElementById("title").focus({ preventScroll: true });
-        } catch {
-            importNotice("Não foi possível ler o arquivo. Confira a conexão e tente novamente; a revisão atual continua preenchida.", true);
-        } finally {
-            busy = false;
-            importButton.disabled = false;
-            generateButton.disabled = false;
-            importButton.textContent = "Carregar para revisão";
-        }
+        document.getElementById("title").focus();
     });
 
     document.getElementById("fill-example").addEventListener("click", () => {
         if (edited && !window.confirm("Substituir os dados preenchidos pelo exemplo?")) return;
         const example = {
-            code: "0001",
             title: "Manutenção preventiva de computador administrativo",
-            version: "1.0",
-            author: "Técnico de exemplo",
-            approver: "Marcone Jose Roque Luna",
             executor: "N2 / N1",
             objective: "Padronizar a manutenção preventiva de um computador de uso administrativo.",
             result: "Computador montado, com funcionamento verificado e eventuais defeitos registrados.",
@@ -358,34 +405,43 @@
         notify("Exemplo preenchido. Revise os dados antes de gerar seu documento.");
     });
 
-    form.addEventListener("submit", async event => {
+    saveButton.addEventListener("click", () => {
+        clearErrors();
+        const json = serialized();
+        if (!json) return;
+        run(saveButton, "Salvando…", async () => {
+            const response = await post("Save", json);
+            if (!response.ok) { await failure(response); return; }
+            const info = await response.json();
+            remember(info.id);
+            if (JSON.stringify(payload()) === json) edited = false;
+            notify(info.message);
+        });
+    });
+
+    form.addEventListener("submit", event => {
         event.preventDefault();
-        if (busy) return;
         clearErrors();
         if (!form.reportValidity()) return;
-        const snapshot = payload();
-        const json = JSON.stringify(snapshot);
-        const maxPayload = Number(form.dataset.maxPayload);
-        if (json.length > maxPayload) {
-            notify(`O POP excede o limite total de ${maxPayload.toLocaleString("pt-BR")} caracteres (atual: ${json.length.toLocaleString("pt-BR")}). Reduza os textos ou divida o conteúdo em mais de um POP.`, true);
-            return;
-        }
-        const data = new FormData();
-        data.set("Payload", json);
-        data.set("__RequestVerificationToken", form.querySelector('[name="__RequestVerificationToken"]').value);
-        busy = true;
-        generateButton.disabled = true;
-        if (importButton) importButton.disabled = true;
-        generateButton.querySelector("span").textContent = "Gerando documento…";
-        try {
-            const response = await fetch(form.action, { method: "POST", body: data, credentials: "same-origin" });
-            if (!response.ok) {
-                if (response.headers.get("content-type")?.includes("application/json")) showValidation(await response.json());
-                else if (response.status === 400) notify("A sessão do formulário expirou. Recarregue a página e tente novamente.", true);
-                else if (response.status === 413) notify("O conteúdo ficou muito extenso. Reduza o texto e tente novamente.", true);
-                else notify("Não foi possível gerar o documento. Tente novamente em instantes.", true);
-                return;
-            }
+        const json = serialized();
+        if (!json) return;
+        run(submitButton, "Enviando…", async () => {
+            const response = await post("Submit", json);
+            if (!response.ok) { await failure(response); return; }
+            const info = await response.json();
+            edited = false;
+            window.location.assign(info.redirect);
+        });
+    });
+
+    downloadButton.addEventListener("click", () => {
+        clearErrors();
+        if (!form.reportValidity()) return;
+        const json = serialized();
+        if (!json) return;
+        run(downloadButton, "Gerando Word…", async () => {
+            const response = await post("Download", json);
+            if (!response.ok) { await failure(response); return; }
             const blob = await response.blob();
             if (!blob.size) throw new Error("Empty document");
             const url = URL.createObjectURL(blob);
@@ -402,18 +458,16 @@
             link.click();
             link.remove();
             window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-            notify("Documento Word gerado. O download foi solicitado ao navegador. Para PDF, abra o arquivo no Word ou LibreOffice e escolha Exportar como PDF.");
-            if (JSON.stringify(payload()) === JSON.stringify(snapshot)) edited = false;
-        } catch {
-            notify("Não foi possível concluir o download. Confira sua conexão e tente novamente; seus campos continuam preenchidos.", true);
-        } finally {
-            busy = false;
-            generateButton.disabled = false;
-            if (importButton) importButton.disabled = false;
-            generateButton.querySelector("span").textContent = generateLabel;
-        }
+            notify("Word gerado com Nº e aprovador pendentes. O documento oficial é o baixado após a validação.");
+        });
     });
 
-    addAction();
+    window.addEventListener("beforeunload", event => {
+        if (edited) event.preventDefault();
+    });
+
+    const initial = JSON.parse(document.getElementById("initial-data").textContent);
+    if (initial) fill(initial);
+    else addAction();
     update();
 })();

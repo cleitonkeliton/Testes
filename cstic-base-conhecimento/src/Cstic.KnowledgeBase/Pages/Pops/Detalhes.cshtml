@@ -1,0 +1,75 @@
+@page "/pops/{id:int}"
+@model DetalhesModel
+@{
+    var pop = Model.Pop;
+    ViewData["Title"] = string.IsNullOrWhiteSpace(pop.Title) ? "POP sem nome" : pop.Title;
+    ViewData["Nav"] = Model.User.IsAdmin && pop.AuthorId != Model.User.Id ? "recebidos" : "pops";
+    var waiting = pop.Status == PopStatus.Enviado;
+}
+<section class="hero">
+    <div>
+        <p class="eyebrow">@(pop.Code is null ? "POP SEM NÚMERO" : $"POP Nº {pop.Code}")</p>
+        <h1>@ViewData["Title"]</h1>
+        <p class="hero-description"><partial name="_StatusBadge" model="pop" /> Autor: <strong>@pop.Author.FullName</strong> (@pop.Author.Function)@if (pop.SubmittedUtc is not null) {<text> · Enviado em @Dates.Format(pop.SubmittedUtc)</text>}</p>
+    </div>
+    <div class="hero-actions">
+        @if (PopService.CanEdit(Model.User, pop))
+        {
+            <a class="button secondary" href="/pops/@pop.Id/editar">@(pop.Status == PopStatus.Validado ? "Iniciar revisão" : "Editar")</a>
+        }
+        <a class="button primary" href="/pops/@pop.Id?handler=Docx">Baixar Word</a>
+    </div>
+</section>
+
+@if (pop.Status == PopStatus.Devolvido && pop.ReturnComment is not null)
+{
+    <div class="notice warning" role="status"><strong>Ajuste solicitado pelo administrador:</strong> <span class="preview-text">@pop.ReturnComment</span></div>
+}
+
+<div class="detail-layout">
+    <div>
+        @if (Model.User.IsAdmin && waiting)
+        {
+            <section class="panel review-panel" aria-labelledby="review-title">
+                <div class="panel-heading"><span class="section-icon" aria-hidden="true">✓</span><div><h2 id="review-title">Validar ou devolver</h2><p>Confira o conteúdo abaixo antes de decidir.</p></div></div>
+                <div class="review-actions">
+                    <form method="post" asp-page-handler="Validate" asp-route-id="@pop.Id" class="review-option">
+                        <p>Ao validar, o POP recebe <strong>Nº @(pop.Code ?? "automático")</strong> e <strong>versão @PopService.NextVersion(pop.Version)</strong>, com você como aprovador.</p>
+                        <button class="button primary" type="submit">Validar POP</button>
+                    </form>
+                    <form method="post" asp-page-handler="Return" asp-route-id="@pop.Id" class="review-option">
+                        <div class="field"><label for="comment">O que precisa ser ajustado? <span>*</span></label><textarea id="comment" name="comment" required minlength="5" maxlength="2000" rows="3" placeholder="Descreva a inconsistência para o técnico corrigir."></textarea></div>
+                        <button class="button secondary danger-button" type="submit">Devolver ao técnico</button>
+                    </form>
+                </div>
+            </section>
+        }
+        <section class="panel" aria-labelledby="content-title">
+            <div class="panel-heading"><span class="section-icon" aria-hidden="true">≡</span><div><h2 id="content-title">@(Model.ShowsValidated ? "Documento validado" : "Conteúdo atual")</h2><p>@(Model.ShowsValidated ? "Exatamente como foi aprovado." : "Número, versão e aprovador são definidos na validação.")</p></div></div>
+            <partial name="_PopPreview" model="Model.Document" />
+        </section>
+    </div>
+    <aside class="document-aside">
+        @if (pop.Versions.Count > 0)
+        {
+            <div class="summary-card">
+                <span class="eyebrow">VERSÕES VALIDADAS</span>
+                <ul class="plain-list">
+                    @foreach (var version in pop.Versions)
+                    {
+                        <li><a href="/pops/@pop.Id?handler=Docx&versao=@version.Version">Versão @version.Version</a><small>@Dates.Format(version.ValidatedUtc) · @version.ValidatedBy.FullName</small></li>
+                    }
+                </ul>
+            </div>
+        }
+        <div class="summary-card">
+            <span class="eyebrow">HISTÓRICO</span>
+            <ol class="plain-list history">
+                @foreach (var item in pop.Events.AsEnumerable().Reverse())
+                {
+                    <li><strong>@item.TypeLabel</strong><small>@Dates.Format(item.CreatedUtc) · @item.User.FullName</small>@if (item.Comment is not null) {<span class="preview-text">@item.Comment</span>}</li>
+                }
+            </ol>
+        </div>
+    </aside>
+</div>

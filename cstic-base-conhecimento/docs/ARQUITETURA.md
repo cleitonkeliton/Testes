@@ -3,31 +3,49 @@
 ## Fluxo
 
 ```text
-GET / → escolha Criar ou Validar
-  ├─ GET /criar → editor inicialmente vazio
-  └─ GET /validar → upload .docx
-       ↓ POST /validar?handler=Import + arquivo + token antiforgery
-       ZIP/XML limitado → confere modelo → dados JSON + avisos
-       ↓ editor preenchido para revisão
-POST /criar?handler=Generate ou /validar?handler=Generate
-  ↓ Payload JSON + token antiforgery
-Validação → cópia em memória do template original → preenchimento XML
-  ↓ resposta attachment → download .docx
+GET /  → sem sessão: /entrar        com sessão: /pops (técnico) ou /admin/pops (administrador)
+/cadastro → conta Pendente → administrador aprova em /admin/usuarios → conta Ativa
+/entrar → cookie de sessão → senha temporária? → /conta/senha (obrigatório)
+
+Técnico:   /pops/novo ou /pops/importar → POST Save (rascunho) → POST Submit (Enviado)
+Administrador: /admin/pops → /pops/{id} → POST Validate (Validado) ou Return (Devolvido)
+Devolvido → técnico edita → Submit        Validado → técnico "Revisar" → rascunho da revisão
+
+Word: GET /pops/{id}?handler=Docx[&versao=1.0]  ou  POST Download no editor
+  → cópia em memória do template original → preenchimento XML → attachment .docx
 ```
 
 ## Modelo de dados
 
-`KnowledgeArticle`: número, nome, versão, autor, aprovador, objetivo, resultado,
-requisitos, executor e lista de `ProcedureAction`.
+Banco SQLite via Entity Framework Core (`Data/AppDbContext.cs`, migrations em
+`Data/Migrations`, aplicadas automaticamente ao iniciar).
 
-`ProcedureAction`: nome da ação e lista de `ProcedureStep`.
+- `UserAccount`: login único, nome completo, função (lista fixa), perfil
+  (Técnico/Administrador), situação (Pendente/Ativo/Inativo), hash da senha, troca
+  obrigatória, tentativas incorretas, fim do bloqueio e *security stamp*.
+- `Pop`: número (nulo até a primeira validação), última versão validada, título,
+  autor, situação (Rascunho/Enviado/Devolvido/Validado), conteúdo atual em JSON,
+  comentário de devolução e datas.
+- `PopEvent`: histórico — criação, importação, envio, devolução (com comentário),
+  validação e início de revisão, com usuário e data.
+- `PopVersion`: cópia imutável do documento exatamente como validado, com número,
+  versão, aprovador e data; é a fonte do Word oficial de cada versão.
 
-`ProcedureStep`: instrução e detalhes opcionais em marcadores.
+O conteúdo editável continua sendo `KnowledgeArticle` → `ProcedureAction` →
+`ProcedureStep`, guardado em JSON. Nº, versão, autor e aprovador **não vêm do
+navegador**: são preenchidos no servidor a partir do POP, da conta do autor e do
+administrador que valida.
 
-Os números não vêm do navegador. O gerador calcula **1º, 2º, 3º…** para as ações
-e reinicia **1.1, 1.2…** dentro de cada uma. Isso impede números duplicados/incorretos
-causados por adicionar, remover ou reordenar itens. O comportamento repete 1.1 em
-cada ação propositalmente, conforme solicitado.
+Os números das ações e subetapas também não vêm do navegador. O gerador calcula
+**1º, 2º, 3º…** para as ações e reinicia **1.1, 1.2…** dentro de cada uma.
+
+### Número e versão
+
+- Primeira validação sem número: o maior número numérico existente + 1, com quatro
+  dígitos (`0001`). Índice único impede repetição.
+- Versão: `1.0` na primeira validação; depois o número menor sobe (`1.1`, `1.2`…).
+- Importação: número do arquivo mantido se válido e livre; versão do arquivo vira a
+  "última validada", então a próxima validação a incrementa.
 
 ## Preenchimento do DOCX
 
@@ -87,35 +105,62 @@ Textos/coleções maiores que os limites são rejeitados, sem truncamento.
 O formulário importa conteúdo textual. Imagens, objetos, tabelas adicionais e
 alterações controladas são rejeitados para evitar perda silenciosa. A geração
 sempre usa os estilos do template original, não os estilos do arquivo recebido.
-A versão/autor/aprovador são preservados para edição; a data final é atualizada.
-Um arquivo inválido não substitui a revisão carregada no navegador. Texto recebido
-é mostrado com `textContent`/campos, nunca executado como HTML.
+Um arquivo válido vira um POP em rascunho do técnico que importou (evento
+"Importado" no histórico); número e versão seguem as regras acima, e o autor passa
+a ser esse técnico. Um arquivo inválido não cria nada. Texto recebido é mostrado
+com `textContent`/campos, nunca executado como HTML.
 
-## Estado e publicação
+## Contas e sessão
 
-Não há login, banco, histórico, serviço externo nem conteúdo de POP salvo no
-servidor. O estado do formulário fica na aba do navegador, sem localStorage.
-Em produção o ASP.NET Core pode usar chaves de proteção para cookies antiforgery;
-essas chaves não são armazenamento de POPs. Reinícios podem exigir recarregar a página.
+- Cookie de autenticação do ASP.NET Core (`HttpOnly`, `SameSite=Lax`), 8 horas com
+  renovação por uso. Chaves de proteção persistidas em `App_Data/chaves`, então
+  reinícios não derrubam sessões.
+- A cada requisição a conta é recarregada do banco: conta desativada, senha
+  redefinida ou perfil alterado (troca do *security stamp*) encerra a sessão na hora.
+- Senhas com `PasswordHasher` (PBKDF2). Login inexistente também passa por uma
+  verificação de hash, para o tempo de resposta não revelar quais logins existem;
+  a situação do cadastro (pendente/desativado) só aparece para quem acertou a senha.
+- Cinco senhas incorretas bloqueiam a conta por 15 minutos.
+- Senha temporária (administrador inicial, criação ou redefinição pelo administrador)
+  bloqueia todas as páginas, exceto `/conta/senha` e `/sair`, até ser trocada.
+- Sempre resta ao menos um administrador ativo; ninguém remove o próprio acesso.
+- O administrador inicial é criado de `appsettings.json` somente quando não existe
+  nenhum administrador. Recuperação sem administrador: comando
+  `redefinir-senha <login>`, executado no servidor, que imprime uma senha temporária.
 
-O SDK é necessário para compilar; o runtime ASP.NET Core é suficiente para
-executar uma publicação dependente de runtime. Docker/IIS/Caddy são opções
-de hospedagem e não dependências do formulário.
+## Autorização
+
+- Política padrão: toda página exige login, exceto `/entrar`, `/cadastro`, `/Error`
+  e `/health`.
+- Pasta `Pages/Admin`: somente perfil Administrador.
+- POPs: o técnico vê e edita apenas os próprios; o administrador vê todos. Edição só
+  em Rascunho, Devolvido ou Validado (que inicia revisão); nunca enquanto Enviado.
+- Validar/devolver só para administradores e só para POPs em Enviado.
+- Requisições do JavaScript enviam o cabeçalho `X-Cstic-Fetch` e recebem 401/403
+  em vez de redirecionamento; o formulário avisa e mantém os campos preenchidos.
 
 ## Proteções incluídas
 
 Token antiforgery, validação no servidor, limites de corpo/coleções, política de
 conteúdo local, bloqueio de embedding em iframe, `nosniff`, respostas POST sem
 cache e limite de 60 envios por minuto por IP observado. Leituras e arquivos
-estáticos não consomem esse limite. Não se confia em `X-Forwarded-For` arbitrário.
-Em um proxy, vários técnicos podem compartilhar o mesmo IP observado.
+estáticos não consomem esse limite. O conteúdo inicial do editor vai numa tag
+`<script type="application/json">` com `<` escapado. Textos do usuário são exibidos
+como texto, nunca interpretados como HTML.
 
-Essas medidas não adicionam controle de acesso: a aplicação continua sem login,
-como solicitado. Um domínio público torna o formulário acessível a quem alcançar
-o endereço. Restrição institucional pode ficar na rede/VPN/proxy.
+## Estado e publicação
+
+POPs, usuários e histórico ficam em `App_Data/cstic.db` (configurável em
+`Dados:Pasta`). Essa pasta precisa de gravação pelo usuário do site e deve entrar no
+backup. O estado do formulário fica na aba até ser salvo; não há localStorage. Sair
+da página com alterações não salvas pede confirmação do navegador.
+
+O SDK é necessário para compilar; o runtime ASP.NET Core é suficiente para
+executar uma publicação dependente de runtime. Docker/IIS/Caddy são opções
+de hospedagem. No Docker, `App_Data` é um volume.
 
 ## Funcionalidades fora da versão
 
-Imagens/anexos no formulário, importação de PDF ou modelos livres, histórico, identificação via AD,
-aprovação digital, numeração central sequencial e PDF automático no servidor.
-A entrega principal é o `.docx` fiel ao template. Para PDF, use Word/LibreOffice.
+Avisos por e-mail, biblioteca de POPs validados para consulta de toda a equipe,
+imagens/anexos, importação de PDF ou modelos livres, identificação via AD,
+assinatura digital certificada e PDF automático no servidor.

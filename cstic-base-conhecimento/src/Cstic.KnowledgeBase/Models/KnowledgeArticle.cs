@@ -22,7 +22,7 @@ public sealed class KnowledgeArticle
 
     [Required(ErrorMessage = "Informe o nome do aprovador.")]
     [StringLength(120, ErrorMessage = "O nome do aprovador deve ter até 120 caracteres.")]
-    public string Approver { get; set; } = "Marcone Jose Roque Luna";
+    public string Approver { get; set; } = "";
 
     [Required(ErrorMessage = "Descreva o objetivo do procedimento.")]
     [StringLength(5000, ErrorMessage = "O objetivo deve ter até 5.000 caracteres.")]
