@@ -6,10 +6,16 @@ Você terá um **site**, não um programa de formulários que cada técnico prec
 instalar. Um computador/servidor executa a aplicação. Os técnicos acessam o
 endereço no navegador — Edge, Chrome, Firefox ou Brave.
 
-O servidor recebe o formulário, valida os campos e preenche uma cópia do modelo
-Word original. O navegador recebe o `.docx` para download. A geração ocorre em
-memória; não existe banco, conta de usuário, histórico ou armazenamento de POPs
-no servidor nesta versão.
+Cada técnico entra com login e senha. Os POPs ficam salvos no servidor, num banco
+**SQLite** (um único arquivo), e seguem o fluxo **rascunho → enviado → devolvido ou
+validado**. O administrador valida ou devolve cada POP, aprova cadastros e gerencia
+usuários. O Word é gerado a partir de uma cópia do modelo original.
+
+**Pasta de dados:** o banco (`cstic.db`) e as chaves das sessões (`chaves\`) ficam
+na pasta `App_Data`, dentro da pasta do site. Ela é criada na primeira execução,
+precisa de **permissão de gravação** e deve entrar no **backup** (seção 9).
+Para usar outro local, defina a configuração `Dados:Pasta` (por exemplo, a variável
+de ambiente `Dados__Pasta=D:\DadosCsticPop`).
 
 **Escolha o caminho de implantação:**
 
@@ -38,7 +44,7 @@ dotnet --info
 ```
 
 O resultado deve listar um SDK **10.0.x**. Não é necessário instalar Visual
-Studio, Node.js, Python, banco de dados ou Word no computador que hospeda o site.
+Studio, Node.js, Python, servidor de banco de dados ou Word no computador que hospeda o site.
 Para editar o código, pode usar VS Code ou Visual Studio com suporte ao .NET 10.
 
 ### 2.2 Extraia o projeto
@@ -94,74 +100,95 @@ http://localhost:5080
 `localhost` significa **o próprio computador**. Neste modo, um colega em outra
 máquina ainda não acessa o site; a seção 4 explica a rede local.
 
-### 2.6 Faça o primeiro documento
+### 2.6 Primeiro acesso do administrador
 
-1. Na tela inicial, escolha **Criar base de conhecimento** e clique em **Preencher um exemplo** para conhecer o funcionamento.
-2. Confira número, nome, versão, autor e aprovador.
-3. A data é automática. Não precisa digitá-la.
-4. Confira **Objetivo, Resultado, Requisitos e Executor**.
-5. Veja as quatro ações do exemplo. Em cada ação as subetapas começam em 1.1.
-6. Clique em **Gerar documento Word**.
-7. O navegador iniciará o download. Se estiver configurado para perguntar,
-   escolha onde salvar. Caso contrário, confira a pasta **Downloads**.
-8. Abra o arquivo no Word ou LibreOffice Writer.
+Na primeira execução, o site cria o administrador:
 
-O arquivo de exemplo serve para demonstrar o preenchimento; revise o conteúdo
-técnico e substitua os dados pelo procedimento real antes de utilizá-lo.
+| Login | Senha inicial |
+|---|---|
+| `adm.audi` | `Senha@123456` |
 
-### 2.7 Gere seu próprio POP
+1. Entre com esses dados. O site exige **trocar a senha** antes de liberar o painel.
+2. Escolha uma senha com pelo menos 10 caracteres, letra e número, sem conter o login.
+3. Em **Usuários → Editar dados**, troque o nome "Administrador CSTIC" pelo seu nome
+   completo. **Esse nome é impresso como Aprovador** nos POPs que você validar.
 
-1. Clique em **Limpar formulário** e confirme.
-2. Preencha os campos marcados com `*`.
-3. Informe o número definido pela CSTIC. Esta versão não gera números sequenciais.
-4. Mantenha ou altere a versão e o aprovador.
-5. Se não houver requisitos, preencha **Não se aplica**.
-6. No procedimento, informe o nome da primeira ação: por exemplo, **Abrir computador**.
-7. Escreva a primeira subetapa: **Retirar os parafusos**.
-8. Clique em **Adicionar subetapa** e escreva **Retirar a tampa**.
-9. Clique em **Adicionar ação principal** e nomeie **Limpeza**.
-10. Acrescente as subetapas dessa ação; a numeração reinicia em **1.1**.
-11. Use `↑` e `↓` para mudar a ordem. As descrições e subetapas acompanham sua ação.
-12. Use `×` para remover. A última ação e a última subetapa de uma ação não podem
-    ser removidas, porque o documento precisa conter um procedimento.
-13. Se quiser uma orientação complementar, use **Adicionar detalhe em marcador**.
-14. Gere e baixe o documento.
+A senha inicial vem de `appsettings.json` (`AdministradorInicial`) e só é usada se o
+banco ainda não tiver nenhum administrador. Depois da troca, ela deixa de valer.
 
-### 2.8 Validar e atualizar uma base existente
+### 2.7 Cadastro e aprovação dos técnicos
 
-1. Na tela inicial, escolha **Validar base existente**. Se estiver criando um POP,
-   use **Escolher outra opção** ou a marca CSTIC para voltar à entrada.
-2. Em **Arquivo da base de conhecimento**, selecione um **Word `.docx` de até 2 MB**.
-   O arquivo precisa seguir o modelo CSTIC: cabeçalho de identificação e cinco
-   seções em tabelas. Pode usar um Word gerado neste site ou preenchido manualmente
-   no modelo original. PDF e `.doc` não são aceitos.
-3. Clique em **Carregar para revisão**. O formulário aparece preenchido quando a
-   leitura é concluída. A mensagem mostra o arquivo carregado e a data nele encontrada.
+1. Na tela de login, o técnico clica em **Solicitar cadastro** e informa nome completo,
+   função (lista fixa), login no formato `primeironome.ultimonome`, senha e confirmação.
+   Letras maiúsculas e acentos do login são convertidos: `José.Souza` vira `jose.souza`.
+   Para nomes repetidos, acrescenta-se um número: `maria.silva2`.
+2. O cadastro fica **aguardando aprovação**; o técnico ainda não consegue entrar.
+3. O administrador abre **Usuários**, confere nome e função e clica em **Aprovar**,
+   escolhendo a permissão (Técnico ou Administrador), ou em **Recusar**.
+
+Em **Usuários**, o administrador também pode:
+
+- **Criar novo cadastro** já ativo, com permissão de técnico ou administrador. A pessoa
+  troca a senha temporária no primeiro acesso.
+- **Redefinir senha** de outra pessoa. A senha atual nunca é mostrada; a nova é
+  temporária e a troca é exigida no próximo login. As sessões abertas são encerradas.
+- **Editar dados** (nome, função e permissão) e **Desativar/Reativar** acessos.
+  Desativar mantém os POPs e o histórico. O sistema não deixa remover o último
+  administrador ativo nem o seu próprio acesso.
+
+Cinco senhas incorretas seguidas bloqueiam o login por 15 minutos. A sessão expira
+após 8 horas sem uso; use **Sair** em computadores compartilhados.
+
+### 2.8 Criar e enviar um POP (técnico)
+
+1. Em **Criar POP**, clique em **Preencher um exemplo** para conhecer o funcionamento.
+2. Preencha nome, executor, **Objetivo, Resultado, Requisitos** e o procedimento.
+   **Nº, versão, autor, aprovador e data são automáticos.**
+3. Em cada ação, as subetapas começam em **1.1**. Use `↑`, `↓` e `×` para organizar.
+4. Clique em **Salvar rascunho** quando quiser; o POP aparece em **Meus POPs**.
+5. Clique em **Enviar para validação**. Faltando informação, o rascunho é salvo e os
+   campos a corrigir são indicados.
+6. Enquanto aguarda validação, o POP não pode ser alterado.
+7. Se o administrador **devolver**, o motivo aparece em **Meus POPs** e no editor.
+   Corrija e envie novamente.
+8. Depois de **validado**, o POP recebe número e versão. Para atualizá-lo, clique em
+   **Revisar**: a versão validada continua disponível até a nova ser aprovada.
+
+**Baixar Word deste conteúdo** gera um arquivo a qualquer momento, mas antes da
+validação o cabeçalho traz `PENDENTE` no número e "Pendente de validação" no aprovador.
+O documento oficial é o baixado depois da validação.
+
+### 2.9 Validar ou devolver (administrador)
+
+1. Em **POPs recebidos**, a aba **Aguardando validação** lista os POPs com o nome e a
+   função de cada técnico. O menu mostra quantos estão pendentes.
+2. Clique em **Analisar** para ver o conteúdo, no mesmo formato do documento, e o histórico.
+3. **Validar POP:** o POP recebe o próximo número livre (`0001`, `0002`…) na primeira
+   validação; a versão começa em **1.0** e sobe a cada revisão validada (**1.1**, **1.2**…).
+   Você fica como aprovador e a data é a da validação.
+4. **Devolver ao técnico:** descreva a inconsistência; o comentário é obrigatório.
+5. As abas **Devolvidos**, **Validados**, **Rascunhos** e **Todos** ajudam a acompanhar.
+   Cada versão validada pode ser baixada pela página do POP.
+
+### 2.10 Importar um POP existente
+
+1. Em **Importar Word**, selecione um **`.docx` de até 2 MB** no modelo CSTIC
+   (cabeçalho de identificação e cinco seções em tabelas). PDF e `.doc` não são aceitos.
+2. Clique em **Carregar para revisão**. O arquivo vira um **rascunho seu**, já aberto
+   no editor, e segue o mesmo fluxo de envio e validação.
+3. O número do arquivo é mantido se ainda não for usado por outro POP; caso contrário,
+   o número é atribuído na validação. A versão do arquivo é a base: um POP 2.3
+   importado é validado como 2.4.
 4. Leia os avisos. Um documento antigo sem ações `1º`, `2º`… terá suas instruções
-   agrupadas em **Procedimento importado**; confira e reorganize conforme necessário.
-5. Confira número, título, autor, aprovador e versão. Você decide se a revisão
-   exige mudar o autor/versão; esses campos não são alterados automaticamente.
-6. Edite objetivo, resultado, requisitos e executor. Corrija campos vazios/fora do
-   padrão antes de gerar o novo arquivo.
-7. Revise ações, subetapas e detalhes. Pode adicionar, remover e reordenar como
-   na criação. Em cada ação, a numeração continua reiniciando em **1.1**.
-8. Clique em **Gerar base revisada** e salve o download. O documento recebe a data
-   atual, calculada no horário de Recife, e mantém o padrão do modelo CSTIC.
-9. Para revisar outro arquivo, use **Limpar revisão** ou selecione/carregue outro
-   Word. Se houver alterações feitas, o sistema pede confirmação para substituí-las.
-
-A revisão significa conferência pelo técnico. Não há assinatura, aprovação digital,
-login ou histórico; guarde o documento baixado no local usado pela seção.
-O arquivo enviado é processado em memória, sem ser salvo pelo aplicativo.
+   agrupadas em **Procedimento importado**; reorganize antes de enviar.
 
 **Se a importação falhar:** o aviso indica formato, estrutura ou tamanho inválido.
-A revisão já preenchida permanece disponível. Não basta renomear PDF para `.docx`.
-Para um `.doc` antigo, abra no Word/LibreOffice e salve como `.docx`, mantendo o modelo.
-Documentos com imagens/objetos ou alterações controladas não são aceitos: faça uma
-cópia somente com texto e finalize as alterações antes de importar. O site importa
-conteúdo textual; fontes, cores e outros ajustes do Word recebido são substituídos
-pelo formato padronizado do template. Textos acima dos limites são rejeitados,
-sem cortar conteúdo.
+Não basta renomear PDF para `.docx`. Para um `.doc` antigo, abra no Word/LibreOffice
+e salve como `.docx`, mantendo o modelo. Documentos com imagens/objetos ou alterações
+controladas não são aceitos: faça uma cópia somente com texto e finalize as alterações
+antes de importar. Fontes, cores e outros ajustes do Word recebido são substituídos
+pelo formato padronizado do template. Textos acima dos limites são rejeitados, sem
+cortar conteúdo.
 
 ## 3. Transformar o Word em PDF
 
@@ -269,9 +296,24 @@ dotnet publish src/Cstic.KnowledgeBase -c Release -o .\publicacao
 7. Adicione um site com caminho físico `C:\Sites\CsticPop` e associe o pool.
 8. Configure o binding: porta, nome DNS e certificado HTTPS, conforme a infraestrutura.
 9. Dê permissão de **leitura e execução** da pasta ao usuário do pool,
-   `IIS AppPool\CsticPop`. O aplicativo não precisa gravar POPs nessa pasta.
-10. Mantenha **Autenticação Anônima** habilitada para o comportamento sem login.
-11. Acesse o endereço configurado e gere um POP de teste.
+   `IIS AppPool\CsticPop`.
+10. Crie a pasta `C:\Sites\CsticPop\App_Data` e dê a `IIS AppPool\CsticPop`
+    permissão de **Modificar** nela. É ali que ficam o banco e as chaves de sessão.
+    No PowerShell como administrador:
+
+    ```powershell
+    New-Item -ItemType Directory -Force C:\Sites\CsticPop\App_Data
+    icacls C:\Sites\CsticPop\App_Data /grant "IIS AppPool\CsticPop:(OI)(CI)M"
+    ```
+
+11. Mantenha **Autenticação Anônima** habilitada no IIS: o login é feito pelo
+    próprio site, não pelo Windows.
+12. Use **HTTPS** no binding, já que o site agora trafega senhas.
+13. Acesse o endereço configurado e faça o primeiro acesso do administrador (seção 2.6).
+
+**Atualizar a versão no IIS:** pare o site ou o pool, copie o conteúdo da nova
+publicação **sem apagar `App_Data`** e inicie novamente. Ao iniciar, o site aplica
+automaticamente as mudanças de estrutura do banco, preservando os dados.
 
 Se publicar em um Windows diferente, compile usando `dotnet publish` nesse
 ambiente ou publique explicitamente para o destino, por exemplo:
@@ -301,7 +343,7 @@ ASP.NET Core. O container executa com usuário sem privilégios.
 ### 6.2 Iniciar localmente
 
 ```bash
-docker run -d --name cstic-pop --restart unless-stopped -p 127.0.0.1:5080:8080 cstic-pop:1.0
+docker run -d --name cstic-pop --restart unless-stopped -p 127.0.0.1:5080:8080 -v cstic_dados:/app/App_Data cstic-pop:1.0
 ```
 
 Abra `http://localhost:5080`.
@@ -309,12 +351,12 @@ Abra `http://localhost:5080`.
 Para permitir rede local, use o mapeamento sem o endereço de loopback:
 
 ```bash
-docker run -d --name cstic-pop --restart unless-stopped -p 5080:8080 cstic-pop:1.0
+docker run -d --name cstic-pop --restart unless-stopped -p 5080:8080 -v cstic_dados:/app/App_Data cstic-pop:1.0
 ```
 
-Use uma das duas opções; não crie dois containers com o mesmo nome. Se o container
-já existir e quiser recriá-lo, primeiro pare/remova o anterior. Não há documentos
-armazenados dentro dele, mas confira se é realmente o container deste aplicativo.
+Use uma das duas opções; não crie dois containers com o mesmo nome. **Os usuários e
+POPs ficam no volume `cstic_dados`**, não no container: recriar o container mantém os
+dados, mas remover o volume apaga tudo.
 
 ### 6.3 Operação
 
@@ -391,9 +433,9 @@ Depois abra:
 https://pop.seu-dominio.org.br
 ```
 
-A porta 8080 do aplicativo permanece apenas na rede interna do Compose. Os
-volumes `caddy_data` e `caddy_config` retêm os dados/certificados do proxy.
-Não remova esses volumes desnecessariamente.
+A porta 8080 do aplicativo permanece apenas na rede interna do Compose. O volume
+`app_dados` guarda o banco com usuários e POPs; `caddy_data` e `caddy_config` retêm
+os certificados do proxy. Não remova esses volumes.
 
 ### 7.4 Atualizar o site
 
@@ -409,11 +451,10 @@ Para parar os serviços sem remover os volumes:
 docker compose down
 ```
 
-Como você pediu **sem login**, qualquer pessoa que consiga acessar o endereço
-pode preencher e gerar um POP. Para uso exclusivo por técnicos, a infraestrutura
-pode restringir o acesso pela rede/VPN institucional ou pelo proxy existente.
-O aplicativo não implementa aprovação eletrônica: informar um aprovador apenas
-preenche seu nome no documento.
+Qualquer pessoa que alcance o endereço vê a tela de login e pode **solicitar**
+cadastro, mas só entra depois da aprovação do administrador. Se o site for publicado
+na internet, considere restringir o acesso à rede/VPN institucional. A validação
+registra no histórico quem aprovou e quando; não é uma assinatura digital certificada.
 
 ## 8. Linux/macOS sem Docker
 
@@ -437,11 +478,31 @@ cd publicacao
 dotnet Cstic.KnowledgeBase.dll --urls http://0.0.0.0:5080
 ```
 
+O banco fica em `publicacao/App_Data`. Ao substituir a publicação, preserve essa pasta.
+
 O runtime **ASP.NET Core 10** precisa estar instalado. Essa publicação depende
 do runtime; não é um executável autocontido. Mantenha o diretório como diretório
 de trabalho, para que os arquivos de CSS, JavaScript e imagens sejam encontrados.
 
-## 9. Diagnóstico de problemas
+## 9. Backup e recuperação de acesso
+
+**Backup:** copie a pasta `App_Data` inteira (banco `cstic.db` e pasta `chaves`).
+Para uma cópia consistente, pare o site/pool antes de copiar ou copie fora do horário
+de uso. Para restaurar, pare o site, devolva a pasta e inicie novamente.
+
+**Esqueci a senha do administrador:** outro administrador pode redefini-la em
+**Usuários**. Se não houver outro, execute no servidor, na pasta da publicação:
+
+```powershell
+dotnet Cstic.KnowledgeBase.dll redefinir-senha adm.audi
+```
+
+O comando reativa a conta, mostra uma **senha temporária** e exige a troca no próximo
+login. Só funciona para quem tem acesso ao servidor. Sem a pasta publicada, use
+`dotnet run --project src/Cstic.KnowledgeBase -c Release -- redefinir-senha adm.audi`.
+Se a pasta de dados não for a padrão, defina `Dados__Pasta` antes de executar.
+
+## 10. Diagnóstico de problemas
 
 | Problema | Como resolver |
 |---|---|
@@ -452,7 +513,10 @@ de trabalho, para que os arquivos de CSS, JavaScript e imagens sejam encontrados
 | Abre no servidor, mas não na rede | Use `0.0.0.0`, o IP real do servidor, a porta certa e confira firewall/rota/VPN. |
 | Página sem estilo na publicação | Execute a DLL de dentro da pasta publicada e preserve a pasta `wwwroot`. |
 | Não gera o Word | Preencha os campos obrigatórios e todas as ações/subetapas; veja a mensagem no formulário. |
-| Mensagem de formulário expirado | O servidor pode ter reiniciado. Recarregue para obter um novo token; o formulário não tem autosave. |
+| Mensagem de formulário expirado | A sessão pode ter expirado. Entre novamente em outra aba e tente de novo; os campos continuam preenchidos. Salve rascunhos com frequência. |
+| Erro 500 ao iniciar / banco somente leitura | O usuário do site precisa de permissão de gravação em `App_Data` (seção 5, passo 10). |
+| Todos foram desconectados após atualizar | A pasta `App_Data\chaves` foi apagada ou trocada. Preserve `App_Data` nas atualizações. |
+| Login bloqueado | Após cinco senhas incorretas, aguarde 15 minutos ou peça ao administrador para redefinir a senha. |
 | Muitas solicitações | Há limite de 60 envios por minuto por IP observado. Aguarde um minuto. Atrás de proxy os usuários podem compartilhar esse IP. |
 | Download não aparece | Confira o aviso de download e a pasta Downloads do navegador. |
 | Certificado online não é emitido | Confira domínio real, DNS A/AAAA, portas 80/443 e logs do Caddy. |
@@ -467,13 +531,18 @@ Endpoint de verificação operacional:
 Ele retorna `{"status":"ok"}`. Para conferir de fato a geração de documento,
 preencha um exemplo e baixe o Word; a resposta do health sozinha não prova esse fluxo.
 
-## 10. Manutenção e mudanças futuras
+## 11. Manutenção e mudanças futuras
 
 - Layout do site: `wwwroot/css/site.css`.
-- Tela inicial: `Pages/Index.cshtml`.
-- Campos/estrutura do editor: `Pages/Editor.cshtml`.
-- Ações/subetapas dinâmicas e download: `wwwroot/js/form.js`.
-- Dados e regras: `Models/KnowledgeArticle.cs` e `Services/ArticleValidator.cs`.
+- Login, cadastro e senha: `Pages/Entrar`, `Pages/Cadastro`, `Pages/Conta/Senha`.
+- Menu e estrutura das páginas: `Pages/Shared/_Layout.cshtml`.
+- Editor de POP: `Pages/Pops/Editor.cshtml`; lista e detalhes: `Pages/Pops`.
+- Painel do administrador: `Pages/Admin/Pops.cshtml` e `Pages/Admin/Usuarios.cshtml`.
+- Ações/subetapas dinâmicas, rascunho, envio e download: `wwwroot/js/form.js`.
+- Regras de conta: `Services/AccountService.cs`; fluxo dos POPs: `Services/PopService.cs`.
+- Banco: `Data/AppDbContext.cs` e `Data/Migrations` (EF Core com SQLite).
+- Dados e regras do documento: `Models/KnowledgeArticle.cs` e `Services/ArticleValidator.cs`.
+- Funções da lista do cadastro: `UserAccount.Functions` em `Models/UserAccount.cs`.
 - Preenchimento do Word: `Services/DocumentService.cs`.
 - Leitura de bases existentes: `Services/DocumentImportService.cs`.
 - Documento original: `Templates/POP_BasedeConhecimento_CSTIC.docx`.
@@ -491,6 +560,6 @@ dotnet run --project tests/Cstic.KnowledgeBase.Tests -c Release
 dotnet publish src/Cstic.KnowledgeBase -c Release -o publicacao
 ```
 
-A opção **Validar base existente** importa o texto do Word para o editor e gera um
-novo arquivo revisado; o arquivo original no computador do técnico não é alterado.
-Salvar rascunhos e guardar histórico podem ser adicionados depois, se a seção precisar.
+Se mudar as classes de `Models` que vão para o banco, gere uma migration
+(`dotnet ef migrations add NomeDaMudanca --project src/Cstic.KnowledgeBase --output-dir Data/Migrations`).
+Ela é aplicada automaticamente na próxima inicialização do site.

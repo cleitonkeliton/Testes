@@ -1,0 +1,49 @@
+@page "/pops"
+@model PopsIndexModel
+@{
+    ViewData["Title"] = "Meus POPs";
+    ViewData["Nav"] = "pops";
+}
+<section class="hero">
+    <div><p class="eyebrow">PROCEDIMENTOS OPERACIONAIS PADRÃO</p><h1>Meus POPs</h1><p class="hero-description">Crie, salve e envie seus POPs para validação. Acompanhe aqui a situação de cada um.</p></div>
+    <div class="hero-actions"><a class="button secondary" href="/pops/importar">Importar Word</a><a class="button primary" href="/pops/novo">Criar POP</a></div>
+</section>
+@if (Model.Pops.Count == 0)
+{
+    <div class="panel empty-state"><h2>Nenhum POP ainda</h2><p>Comece criando um POP ou importando um documento Word no modelo CSTIC.</p></div>
+}
+else
+{
+    <div class="panel table-panel">
+        <table class="data-table">
+            <thead><tr><th scope="col">Nº</th><th scope="col">Nome</th><th scope="col">Versão</th><th scope="col">Situação</th><th scope="col">Atualizado</th><th scope="col"><span class="visually-hidden">Ações</span></th></tr></thead>
+            <tbody>
+                @foreach (var pop in Model.Pops)
+                {
+                    <tr>
+                        <td>@(pop.Code ?? "—")</td>
+                        <td><a href="/pops/@pop.Id">@(string.IsNullOrWhiteSpace(pop.Title) ? "(sem nome)" : pop.Title)</a>
+                            @if (pop.Status == PopStatus.Devolvido)
+                            {
+                                <small class="return-hint">Ajuste solicitado: @pop.ReturnComment</small>
+                            }
+                        </td>
+                        <td>@(pop.Version ?? "—")</td>
+                        <td><partial name="_StatusBadge" model="pop" /></td>
+                        <td>@Dates.Format(pop.UpdatedUtc)</td>
+                        <td class="row-actions">
+                            @if (PopService.CanEdit(Model.User, pop))
+                            {
+                                <a href="/pops/@pop.Id/editar">@(pop.Status == PopStatus.Validado ? "Revisar" : "Editar")</a>
+                            }
+                            else
+                            {
+                                <a href="/pops/@pop.Id">Ver</a>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

@@ -9,6 +9,9 @@ RUN dotnet publish src/Cstic.KnowledgeBase/Cstic.KnowledgeBase.csproj -c Release
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish ./
+# Database and session keys; mount a volume here so users and POPs survive container updates.
+RUN mkdir -p /app/App_Data && chown app:app /app/App_Data
+VOLUME /app/App_Data
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 EXPOSE 8080

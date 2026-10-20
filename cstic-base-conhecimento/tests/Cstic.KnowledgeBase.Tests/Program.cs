@@ -1,8 +1,12 @@
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
+using Cstic.KnowledgeBase.Data;
 using Cstic.KnowledgeBase.Models;
 using Cstic.KnowledgeBase.Services;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 var tests = new List<(string Name, Action Run)>();
 KnowledgeArticle Example() => new()
@@ -62,6 +66,12 @@ tests.Add(("Nenhuma etapa e lista nula", () =>
     Assert(ArticleValidator.Validate(article).ContainsKey("actions"));
     article.Actions = null;
     Assert(ArticleValidator.Validate(article).ContainsKey("actions"));
+}));
+tests.Add(("Limites de tamanho têm mensagens em português", () =>
+{
+    var article = Example(); article.Author = new string('a', 121); article.Objective = new string('a', 5001);
+    var errors = ArticleValidator.Validate(article);
+    Assert(errors["author"].Single().Contains("120 caracteres") && errors["objective"].Single().Contains("5.000 caracteres"));
 }));
 tests.Add(("Campos de etapa identificados pelo índice", () =>
 {
@@ -266,6 +276,21 @@ tests.Add(("Textos acima dos limites são rejeitados sem cortar conteúdo", () =
         return xml;
     }));
 }));
+tests.Add(("Importação rejeita POP maior que o limite de geração", () =>
+{
+    var article = Example();
+    article.Actions = Enumerable.Range(0, 20).Select(i => new ProcedureAction
+    {
+        Title = $"Ação {i}",
+        Steps = Enumerable.Range(0, 5).Select(j => new ProcedureStep
+            { Instruction = $"Subetapa {j}", Details = [new string('á', 900), new string('b', 900)] }).ToList()
+    }).ToList();
+    Assert(ArticleValidator.Validate(article).Count == 0, "Cada campo deve respeitar seu limite individual");
+    Assert(ArticleValidator.PayloadLength(article) > ArticleValidator.MaxPayloadLength);
+    try { importer.Import(documents.CreateWord(article)); }
+    catch (DocumentImportException exception) { Assert(exception.Message.Contains("180.000")); return; }
+    throw new InvalidOperationException("POP acima do limite deveria ser rejeitado na importação");
+}));
 tests.Add(("ZIP com entrada duplicada é rejeitado", () =>
 {
     using var memory = new MemoryStream(); memory.Write(documents.CreateWord(Example())); memory.Position = 0;
@@ -290,6 +315,191 @@ tests.Add(("Documento expandido acima do limite é rejeitado", () =>
     using (var zip = new ZipArchive(memory, ZipArchiveMode.Update, leaveOpen: true))
         using (var stream = zip.CreateEntry("extra.bin", CompressionLevel.Optimal).Open()) stream.Write(new byte[13 * 1024 * 1024]);
     Rejected(memory.ToArray());
+}));
+
+// Accounts and POP workflow, each test with an empty in-memory database.
+(AccountService Accounts, PopService Pops, AppDbContext Db) NewDatabase()
+{
+    var connection = new SqliteConnection("DataSource=:memory:");
+    connection.Open();
+    var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options);
+    db.Database.Migrate();
+    return (new AccountService(db, new FixedClock(), new PasswordHasher<UserAccount>()), new PopService(db, new FixedClock(), documents), db);
+}
+void Fails<T>(Func<Task> action, string expected) where T : Exception
+{
+    try { action().GetAwaiter().GetResult(); }
+    catch (T exception) { Assert(exception.Message.Contains(expected), $"Mensagem inesperada: {exception.Message}"); return; }
+    throw new InvalidOperationException($"Deveria falhar com '{expected}'");
+}
+(AccountService Accounts, PopService Pops, AppDbContext Db, UserAccount Admin, UserAccount Tech) Team()
+{
+    var (accounts, pops, db) = NewDatabase();
+    accounts.EnsureInitialAdminAsync("adm.audi", "Administrador CSTIC", "Qualidade", "Senha@123456").Wait();
+    var admin = db.Users.Single();
+    var tech = accounts.RegisterAsync("Maria José da Silva", "Técnico N1", "maria.silva", "Manutencao2026", "Manutencao2026").Result;
+    accounts.ApproveAsync(admin, tech.Id, UserRole.Tecnico).Wait();
+    return (accounts, pops, db, admin, tech);
+}
+tests.Add(("Administrador inicial exige troca de senha e não é recriado", () =>
+{
+    var (accounts, _, db) = NewDatabase();
+    accounts.EnsureInitialAdminAsync("adm.audi", "Administrador CSTIC", "Qualidade", "Senha@123456").Wait();
+    accounts.EnsureInitialAdminAsync("adm.audi", "Administrador CSTIC", "Qualidade", "Outra@123456").Wait();
+    var admin = db.Users.Single();
+    Assert(admin.IsAdmin && admin.MustChangePassword && admin.Status == UserStatus.Ativo);
+    Assert(!admin.PasswordHash.Contains("Senha@123456"), "Senha não pode ser guardada em texto");
+    var result = accounts.SignInAsync("adm.audi", "Senha@123456").Result;
+    Assert(result.User?.Id == admin.Id);
+}));
+tests.Add(("Cadastro normaliza login e só entra após aprovação", () =>
+{
+    var (accounts, _, db) = NewDatabase();
+    accounts.EnsureInitialAdminAsync("adm.audi", "Administrador CSTIC", "Qualidade", "Senha@123456").Wait();
+    var user = accounts.RegisterAsync("  José   Souza ", "Técnico N2", " José.Souza ", "Manutencao2026", "Manutencao2026").Result;
+    Assert(user.Login == "jose.souza" && user.FullName == "José Souza" && user.Status == UserStatus.Pendente);
+    Assert(accounts.SignInAsync("jose.souza", "Manutencao2026").Result.Error!.Contains("aguarda"));
+    Assert(accounts.SignInAsync("jose.souza", "errada12345").Result.Error == "Login ou senha incorretos.", "Situação só aparece com a senha correta");
+    accounts.ApproveAsync(db.Users.First(item => item.Role == UserRole.Administrador), user.Id, UserRole.Tecnico).Wait();
+    Assert(accounts.SignInAsync("JOSE.SOUZA", "Manutencao2026").Result.User?.Id == user.Id);
+}));
+tests.Add(("Cadastro valida login, nome, função e senha", () =>
+{
+    var (accounts, _, _) = NewDatabase();
+    foreach (var login in new[] { "maria", "maria silva", "maria.silva.souza", "maria.silva123", "m@ria.silva" })
+        Fails<AccountException>(() => accounts.RegisterAsync("Maria Silva", "Técnico N1", login, "Manutencao2026", "Manutencao2026"), "primeironome.ultimonome");
+    Fails<AccountException>(() => accounts.RegisterAsync("Maria", "Técnico N1", "maria.silva", "Manutencao2026", "Manutencao2026"), "nome completo");
+    Fails<AccountException>(() => accounts.RegisterAsync("Maria Silva", "Gerente", "maria.silva", "Manutencao2026", "Manutencao2026"), "função");
+    Fails<AccountException>(() => accounts.RegisterAsync("Maria Silva", "Técnico N1", "maria.silva", "curta1", "curta1"), "10 a 128");
+    Fails<AccountException>(() => accounts.RegisterAsync("Maria Silva", "Técnico N1", "maria.silva", "somenteletras", "somenteletras"), "letra e um número");
+    Fails<AccountException>(() => accounts.RegisterAsync("Maria Silva", "Técnico N1", "maria.silva", "maria.silva2026", "maria.silva2026"), "login");
+    Fails<AccountException>(() => accounts.RegisterAsync("Maria Silva", "Técnico N1", "maria.silva", "Manutencao2026", "Manutencao2027"), "confirmação");
+    accounts.RegisterAsync("Maria Silva", "Técnico N1", "maria.silva", "Manutencao2026", "Manutencao2026").Wait();
+    Fails<AccountException>(() => accounts.RegisterAsync("Maria Souza", "Técnico N1", "Maria.Silva", "Manutencao2026", "Manutencao2026"), "maria.silva2");
+    accounts.RegisterAsync("Maria Souza", "Técnico N1", "maria.silva2", "Manutencao2026", "Manutencao2026").Wait();
+}));
+tests.Add(("Cinco senhas incorretas bloqueiam o acesso", () =>
+{
+    var (accounts, _, _, _, _) = Team();
+    for (var i = 0; i < AccountService.MaxFailedLogins; i++) accounts.SignInAsync("maria.silva", "errada12345").Wait();
+    Assert(accounts.SignInAsync("maria.silva", "Manutencao2026").Result.Error!.Contains("Muitas tentativas"));
+}));
+tests.Add(("Redefinição pelo administrador troca a senha e encerra sessões", () =>
+{
+    var (accounts, _, _, _, tech) = Team();
+    var stamp = tech.SecurityStamp;
+    accounts.ResetPasswordAsync(tech.Id, "Provisoria2026", "Provisoria2026").Wait();
+    Assert(tech.MustChangePassword && tech.SecurityStamp != stamp);
+    Assert(accounts.SignInAsync("maria.silva", "Manutencao2026").Result.User is null);
+    Assert(accounts.SignInAsync("maria.silva", "Provisoria2026").Result.User is not null);
+    Fails<AccountException>(() => accounts.ChangePasswordAsync(tech, "errada", "Definitiva2026", "Definitiva2026"), "atual");
+    accounts.ChangePasswordAsync(tech, "Provisoria2026", "Definitiva2026", "Definitiva2026").Wait();
+    Assert(!tech.MustChangePassword);
+}));
+tests.Add(("Sempre resta um administrador ativo", () =>
+{
+    var (accounts, _, _, admin, tech) = Team();
+    Fails<AccountException>(() => accounts.SetActiveAsync(admin, admin.Id, false), "próprio");
+    Fails<AccountException>(() => accounts.UpdateAsync(admin, admin.Id, "Administrador CSTIC", "Qualidade", UserRole.Tecnico), "próprio");
+    accounts.UpdateAsync(admin, tech.Id, "Maria José da Silva", "Supervisor", UserRole.Administrador).Wait();
+    accounts.SetActiveAsync(tech, admin.Id, false).Wait();
+    Fails<AccountException>(() => accounts.SetActiveAsync(admin, tech.Id, false), "pelo menos um administrador");
+    accounts.SetActiveAsync(tech, admin.Id, true).Wait();
+    Assert(accounts.SignInAsync("adm.audi", "Senha@123456").Result.User is not null);
+}));
+tests.Add(("Cadastro recusado é removido e desativado não entra", () =>
+{
+    var (accounts, _, db, admin, tech) = Team();
+    var pending = accounts.RegisterAsync("Carlos Lima", "Outro", "carlos.lima", "Manutencao2026", "Manutencao2026").Result;
+    accounts.RejectAsync(pending.Id).Wait();
+    Assert(!db.Users.Any(item => item.Login == "carlos.lima"));
+    accounts.SetActiveAsync(admin, tech.Id, false).Wait();
+    Assert(accounts.SignInAsync("maria.silva", "Manutencao2026").Result.Error!.Contains("desativado"));
+}));
+tests.Add(("Recuperação pelo servidor gera senha temporária", () =>
+{
+    var (accounts, _, db) = NewDatabase();
+    accounts.EnsureInitialAdminAsync("adm.audi", "Administrador CSTIC", "Qualidade", "Senha@123456").Wait();
+    var password = accounts.EmergencyResetAsync("adm.audi").Result;
+    Assert(accounts.SignInAsync("adm.audi", password).Result.User?.MustChangePassword == true);
+    Assert(accounts.SignInAsync("adm.audi", "Senha@123456").Result.User is null);
+}));
+tests.Add(("Fluxo do POP: rascunho, envio, devolução e validação", () =>
+{
+    var (_, pops, _, admin, tech) = Team();
+    var incomplete = Example(); incomplete.Objective = "";
+    var (pop, errors) = pops.SubmitAsync(tech, null, incomplete).Result;
+    Assert(errors.ContainsKey("objective") && pop.Status == PopStatus.Rascunho, "Incompleto fica em rascunho");
+    (pop, errors) = pops.SubmitAsync(tech, pop.Id, Example()).Result;
+    Assert(errors.Count == 0 && pop.Status == PopStatus.Enviado);
+    Fails<PopException>(() => pops.SaveAsync(tech, pop.Id, Example()), "aguardando validação");
+    Fails<PopException>(() => pops.ReturnAsync(admin, pop.Id, "ok"), "5 a 2.000");
+    pops.ReturnAsync(admin, pop.Id, "Detalhar a limpeza.").Wait();
+    Assert(pop.Status == PopStatus.Devolvido && pop.ReturnComment == "Detalhar a limpeza.");
+    Fails<PopException>(() => pops.ValidateAsync(admin, pop.Id), "não está aguardando");
+    pops.SubmitAsync(tech, pop.Id, Example()).Wait();
+    var version = pops.ValidateAsync(admin, pop.Id).Result;
+    Assert(version.Code == "0001" && version.Version == "1.0" && pop.Status == PopStatus.Validado && pop.ReturnComment is null);
+    var header = PopService.Content(version.ContentJson);
+    Assert(header.Author == "Maria José da Silva" && header.Approver == "Administrador CSTIC");
+    Assert(pop.Events.Select(item => item.Type).SequenceEqual([PopEventType.Criado, PopEventType.Enviado, PopEventType.Devolvido, PopEventType.Enviado, PopEventType.Validado]));
+    var second = pops.SubmitAsync(tech, null, Example()).Result.Pop;
+    Assert(pops.ValidateAsync(admin, second.Id).Result.Code == "0002", "Numeração sequencial");
+}));
+tests.Add(("Revisão mantém o número, sobe a versão e preserva a anterior", () =>
+{
+    var (_, pops, _, admin, tech) = Team();
+    var pop = pops.SubmitAsync(tech, null, Example()).Result.Pop;
+    pops.ValidateAsync(admin, pop.Id).Wait();
+    var revised = Example(); revised.Title = "Manutenção revisada";
+    pops.SaveAsync(tech, pop.Id, revised).Wait();
+    Assert(pop.Status == PopStatus.Rascunho && pop.StatusLabel == "Revisão em rascunho");
+    using (var zip = new ZipArchive(new MemoryStream(pops.Download(pop, "1.0").Bytes)))
+        Assert(Text(ReadXml(zip, "word/header3.xml")).Contains("Manutenção preventiva"), "Versão 1.0 continua igual");
+    pops.SubmitAsync(tech, pop.Id, revised).Wait();
+    var version = pops.ValidateAsync(admin, pop.Id).Result;
+    Assert(version.Code == "0001" && version.Version == "1.1" && pop.Versions.Count == 2);
+    using var latest = new ZipArchive(new MemoryStream(pops.Download(pop).Bytes));
+    var text = Text(ReadXml(latest, "word/header3.xml"));
+    Assert(text.Contains("Manutenção revisada") && text.Contains("1.1") && text.Contains("07/10/2026"), "Cabeçalho da revisão validada: " + text);
+}));
+tests.Add(("Rascunho baixado traz número e aprovador pendentes", () =>
+{
+    var (_, pops, _, _, tech) = Team();
+    var pop = pops.SaveAsync(tech, null, Example()).Result;
+    using var zip = new ZipArchive(new MemoryStream(pops.Download(pop).Bytes));
+    var header = Text(ReadXml(zip, "word/header3.xml"));
+    Assert(header.Contains(PopService.PendingCode) && header.Contains(PopService.PendingApprover) && header.Contains("Maria José da Silva"));
+    var empty = pops.SaveAsync(tech, null, new KnowledgeArticle()).Result;
+    Fails<PopException>(() => Task.FromResult(pops.Download(empty)), "obrigatórios");
+}));
+tests.Add(("Importação mantém número livre e versão do arquivo", () =>
+{
+    var (_, pops, _, admin, tech) = Team();
+    var source = Example(); source.Code = "0042"; source.Version = "2.3";
+    var imported = pops.ImportAsync(tech, importer.Import(documents.CreateWord(source)), "antigo.docx").Result;
+    Assert(imported.Code == "0042" && imported.Version == "2.3" && imported.Status == PopStatus.Rascunho);
+    var repeated = pops.ImportAsync(tech, importer.Import(documents.CreateWord(source)), "copia.docx").Result;
+    Assert(repeated.Code is null, "Número já usado não é repetido");
+    pops.SubmitAsync(tech, imported.Id, PopService.Content(imported.ContentJson)).Wait();
+    var version = pops.ValidateAsync(admin, imported.Id).Result;
+    Assert(version.Code == "0042" && version.Version == "2.4");
+    pops.SubmitAsync(tech, repeated.Id, PopService.Content(repeated.ContentJson)).Wait();
+    Assert(pops.ValidateAsync(admin, repeated.Id).Result.Code == "0043", "Próximo número após o maior existente");
+}));
+tests.Add(("Técnico só acessa os próprios POPs", () =>
+{
+    var (accounts, pops, _, admin, tech) = Team();
+    var other = accounts.CreateByAdminAsync(admin, "João Pedro Lima", "Técnico N2", "joao.lima", UserRole.Tecnico, "Temporaria2026", "Temporaria2026").Result;
+    var pop = pops.SaveAsync(tech, null, Example()).Result;
+    Assert(!PopService.CanView(other, pop) && PopService.CanView(admin, pop) && PopService.CanView(tech, pop));
+    Fails<PopException>(() => pops.SaveAsync(other, pop.Id, Example()), "não pode alterar");
+    Assert(!PopService.CanEdit(admin, pop), "Administrador devolve em vez de editar");
+}));
+tests.Add(("Versão sobe a partir da última validada", () =>
+{
+    Assert(PopService.NextVersion(null) == "1.0" && PopService.NextVersion("1.0") == "1.1" && PopService.NextVersion("1.9") == "1.10");
+    Assert(PopService.NextVersion("2") == "2.1" && PopService.NextVersion("1.0.3") == "1.1");
 }));
 
 var failures = 0;

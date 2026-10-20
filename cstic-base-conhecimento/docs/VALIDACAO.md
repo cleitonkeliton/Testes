@@ -2,58 +2,42 @@
 
 ## Ambiente usado
 
-Linux Debian 13 x64, SDK .NET **10.0.401**, runtime ASP.NET Core **10.0.12**,
-Chromium e LibreOffice disponíveis na máquina de desenvolvimento.
-O SDK foi baixado da Microsoft e verificado pelo SHA-512 dos metadados oficiais.
+Linux x64, SDK .NET **10.0.112**, EF Core **10.0.13** com SQLite, Chromium
+(Playwright 1.56) para o teste de navegador. A verificação de vulnerabilidades do
+NuGet (`NuGetAudit`) passou sem avisos; o projeto trata avisos como erros.
 
 ## Verificações concluídas
 
 | Verificação | Resultado |
 |---|---|
 | Build Release | Passou; zero erros e zero avisos de compilação. |
-| Executável de testes C# | 30 de 30 verificações passaram. |
-| Teste real de navegador/HTTP | 70 de 70 verificações passaram. |
-| Download pelo navegador | `.docx` válido, com conteúdo preenchido e rodapé dinâmico. |
-| Importação e revisão | Campos, ações/subetapas/detalhes preservados; edição e novo download conferidos. |
-| Rejeição de uploads | Arquivo inválido, formato/modelo incorreto, texto/ZIP excessivo, DTD, duplicatas, imagens e alterações controladas rejeitados. |
-| Numeração | Ações 1º–4º e reinício em 1.1 dentro de cada ação confirmados no arquivo. |
-| Validação de campos no servidor | Obrigatórios, executor, listas vazias/nulas, tamanho e JSON inválido rejeitados. |
-| Antiforgery | POST sem token recebeu HTTP 400. |
-| Uso simultâneo | 12 gerações independentes verificadas no teste C#. |
-| Celular | Largura de 390 px, sem rolagem horizontal e sem erro JavaScript. |
-| Base revisada | Word gerado após importação/edição aberto no LibreOffice; PDF A4 de uma página com nova subetapa 1.5. |
-| Documento de exemplo | Aberto no LibreOffice e renderizado em PDF A4 de uma página. |
-| Documento longo | 80 subetapas, PDF de sete páginas; último item e cabeçalho em todas as páginas conferidos. |
-| `dotnet publish` | Publicação Release concluída. |
-| Execução da publicação | Health, página, JavaScript e download real do Word passaram. |
-| Script shell | Sintaxe de `iniciar.sh` verificada. |
-| Docker Compose | Configuração validada com domínio de exemplo informado. |
+| Executável de testes C# | 46 de 46 verificações passaram. |
+| Teste real de navegador/HTTP | 101 de 101 verificações passaram, com banco vazio. |
+| Primeiro acesso | `adm.audi` / `Senha@123456` entra e é obrigado a trocar a senha antes do painel. |
+| Cadastro e aprovação | Login normalizado, lista fixa de funções, senhas fracas/diferentes recusadas, pendente não entra, aprovação libera. |
+| Gestão de usuários | Criação com troca no primeiro acesso, redefinição sem exibir a senha (encerra a sessão), desativação, bloqueio após 5 erros, último administrador protegido. |
+| Fluxo do POP | Rascunho, envio, bloqueio de edição, devolução com comentário, correção, reenvio e validação. |
+| Número e versão | `0001`/1.0 na primeira validação, `0002` no POP seguinte, 1.1 na revisão, versão anterior ainda disponível. |
+| Word | Rascunho com Nº e aprovador pendentes; validado com número, versão, autor, aprovador e data da validação. |
+| Importação | Vira rascunho do técnico; número livre mantido, número repetido substituído; versão do arquivo como base. |
+| Permissões | Técnico não acessa painel nem POPs de outros; visitante não salva; antiforgery exigido. |
+| Comando de recuperação | `redefinir-senha adm.audi` gera senha temporária; login inexistente retorna erro. |
+| Celular | Largura de 390 px sem rolagem horizontal no editor, POPs recebidos e usuários; sem erro JavaScript. |
 
 ## Verificações que não foram concluídas
 
-- **Build/execução Docker:** o download das imagens oficiais Microsoft foi
-  bloqueado pelo proxy de rede deste ambiente, com HTTP 403 ao domínio
-  `westcentralus.data.mcr.microsoft.com`. Foi salva a adição desse domínio no
-  rascunho de configuração, preservando as regras existentes; a liberação ainda
-  não foi observada na máquina. A falha ocorreu antes de compilar o código
-  dentro do Docker. Dockerfile/Compose foram entregues, mas a imagem/container
-  não foram validados como funcionais nesta máquina. A execução direta .NET foi.
-- **IIS e PowerShell:** arquivos/instruções fornecidos para Windows; não houve
-  execução em Windows/IIS nesta máquina Linux.
-- **Publicação online, DNS e HTTPS público:** instruções fornecidas, sem
-  implantação em um domínio/servidor real do hospital.
-- **Microsoft Word:** o DOCX foi validado estruturalmente e aberto no LibreOffice;
-  não houve execução do Microsoft Word nesta máquina. Pequenas diferenças de
-  paginação entre editores/fontes são possíveis.
-
-Esses itens não são apresentados como testes aprovados. O fluxo local validado
-é criar ou importar uma base existente, revisar no navegador e baixar Word a partir do template enviado.
+- **IIS e PowerShell:** instruções fornecidas (incluindo permissão de gravação em
+  `App_Data`); não houve execução em Windows/IIS nesta máquina Linux.
+- **Docker:** Dockerfile e Compose atualizados com volume para `App_Data`, mas a
+  imagem não foi construída nesta máquina.
+- **Microsoft Word:** o DOCX foi validado estruturalmente; não houve execução do
+  Microsoft Word nesta máquina.
 
 ## Reproduzir
 
 ```bash
 dotnet run --project tests/Cstic.KnowledgeBase.Tests -c Release
-dotnet run --project src/Cstic.KnowledgeBase -c Release --urls http://localhost:5080
+Dados__Pasta=/tmp/cstic-teste dotnet run --project src/Cstic.KnowledgeBase -c Release --urls http://localhost:5080
 ```
 
 Em outro terminal, com Python/Playwright instalados:
@@ -62,8 +46,9 @@ Em outro terminal, com Python/Playwright instalados:
 python tests/browser_smoke.py --url http://localhost:5080
 ```
 
-Para usar um Chromium já instalado no sistema, acrescente
-`--browser /caminho/do/chromium`.
+O teste de navegador espera um banco vazio (usa a senha inicial do administrador).
+Apague a pasta indicada em `Dados__Pasta` antes de repeti-lo. Para usar um Chromium
+já instalado, acrescente `--browser /caminho/do/chromium`.
 
 Para gerar um Word de exemplo pelo executável de testes:
 
@@ -71,11 +56,4 @@ Para gerar um Word de exemplo pelo executável de testes:
 dotnet run --project tests/Cstic.KnowledgeBase.Tests -c Release -- --example artifacts/Exemplo_POP_CSTIC.docx
 ```
 
-Para conferir a renderização, com LibreOffice instalado:
-
-```bash
-soffice --headless --convert-to pdf --outdir artifacts artifacts/Exemplo_POP_CSTIC.docx
-```
-
-As pastas `bin`, `obj` e `artifacts` do projeto são ignoradas pelo Git.
-O ZIP de entrega contém o código, guia e exemplos, sem essas pastas geradas.
+As pastas `bin`, `obj`, `artifacts` e `App_Data` são ignoradas pelo Git.

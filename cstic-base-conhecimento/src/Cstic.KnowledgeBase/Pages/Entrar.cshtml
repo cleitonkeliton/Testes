@@ -1,0 +1,26 @@
+@page "/entrar"
+@model EntrarModel
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Entrar";
+}
+<section class="auth-card" aria-labelledby="login-title">
+    <p class="eyebrow">BASE DE CONHECIMENTO DA EQUIPE</p>
+    <h1 id="login-title">Entrar</h1>
+    <p class="hero-description">Use seu login no formato primeironome.ultimonome.</p>
+    @if (Model.Error is not null)
+    {
+        <div class="notice error" role="alert">@Model.Error</div>
+    }
+    @if (TempData["Notice"] is string notice)
+    {
+        <div class="notice" role="status">@notice</div>
+    }
+    <form method="post" class="auth-form">
+        <input type="hidden" name="returnUrl" value="@Model.ReturnUrl">
+        <div class="field"><label for="login">Login</label><input id="login" name="login" value="@Model.Login" required maxlength="60" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="maria.silva" autofocus></div>
+        <div class="field"><label for="password">Senha</label><input id="password" name="password" type="password" required maxlength="128" autocomplete="current-password"></div>
+        <button class="button primary" type="submit">Entrar</button>
+    </form>
+    <p class="auth-switch">Ainda não tem acesso? <a href="/cadastro">Solicitar cadastro</a></p>
+</section>

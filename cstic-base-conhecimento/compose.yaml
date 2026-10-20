@@ -6,6 +6,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
     expose:
       - "8080"
+    volumes:
+      - app_dados:/app/App_Data
 
   caddy:
     image: caddy:2-alpine
@@ -23,5 +25,6 @@ services:
       - caddy_config:/config
 
 volumes:
+  app_dados:
   caddy_data:
   caddy_config:

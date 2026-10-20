@@ -1,0 +1,32 @@
+@page "/cadastro"
+@model CadastroModel
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Solicitar cadastro";
+}
+<section class="auth-card" aria-labelledby="register-title">
+    <p class="eyebrow">NOVO ACESSO</p>
+    <h1 id="register-title">Solicitar cadastro</h1>
+    <p class="hero-description">O acesso é liberado depois da aprovação do administrador.</p>
+    @if (Model.Error is not null)
+    {
+        <div class="notice error" role="alert">@Model.Error</div>
+    }
+    <form method="post" class="auth-form">
+        <div class="field"><label for="fullName">Nome completo</label><input id="fullName" name="fullName" value="@Model.FullName" required maxlength="120" autocomplete="name" autofocus></div>
+        <div class="field"><label for="function">Função</label>
+            <select id="function" name="function" required>
+                <option value="">Selecione</option>
+                @foreach (var function in UserAccount.Functions)
+                {
+                    <option value="@function" selected="@(function == Model.Function)">@function</option>
+                }
+            </select>
+        </div>
+        <div class="field"><label for="login">Login</label><input id="login" name="login" value="@Model.Login" required maxlength="60" pattern="[A-Za-zÀ-ÿ]+\.[A-Za-zÀ-ÿ]+[0-9]{0,2}" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="primeironome.ultimonome" aria-describedby="login-help"><small id="login-help">Ex.: maria.silva. Letras maiúsculas e acentos são convertidos.</small></div>
+        <div class="field"><label for="password">Senha</label><input id="password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password" aria-describedby="password-help"><small id="password-help">Mínimo de 10 caracteres, com letra e número.</small></div>
+        <div class="field"><label for="confirmation">Confirmar senha</label><input id="confirmation" name="confirmation" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></div>
+        <button class="button primary" type="submit">Enviar cadastro</button>
+    </form>
+    <p class="auth-switch">Já tem acesso? <a href="/entrar">Entrar</a></p>
+</section>

@@ -1,0 +1,114 @@
+@page "/admin/usuarios"
+@model UsuariosModel
+@{
+    ViewData["Title"] = "Usuários";
+    ViewData["Nav"] = "usuarios";
+    var pending = Model.Users.Where(user => user.Status == UserStatus.Pendente).ToList();
+    var others = Model.Users.Where(user => user.Status != UserStatus.Pendente).ToList();
+}
+@functions {
+    private static Microsoft.AspNetCore.Html.IHtmlContent FunctionOptions(string? selected)
+    {
+        var builder = new Microsoft.AspNetCore.Html.HtmlContentBuilder();
+        foreach (var function in UserAccount.Functions)
+        {
+            var option = new Microsoft.AspNetCore.Mvc.Rendering.TagBuilder("option");
+            option.Attributes["value"] = function;
+            if (function == selected) option.Attributes["selected"] = "selected";
+            option.InnerHtml.Append(function);
+            builder.AppendHtml(option);
+        }
+        return builder;
+    }
+}
+<section class="hero">
+    <div><p class="eyebrow">ADMINISTRAÇÃO</p><h1>Usuários</h1><p class="hero-description">Aprove cadastros, crie acessos e redefina senhas. As senhas nunca são exibidas.</p></div>
+</section>
+
+<section class="panel" aria-labelledby="pending-title">
+    <div class="panel-heading"><span class="section-icon" aria-hidden="true">01</span><div><h2 id="pending-title">Cadastros aguardando aprovação</h2><p>Confirme o nome e a função antes de liberar o acesso.</p></div><span class="count-badge">@pending.Count</span></div>
+    @if (pending.Count == 0)
+    {
+        <p class="muted">Nenhum cadastro pendente.</p>
+    }
+    else
+    {
+        <div class="table-scroll">
+        <table class="data-table">
+            <thead><tr><th scope="col">Nome</th><th scope="col">Função</th><th scope="col">Login</th><th scope="col">Solicitado em</th><th scope="col"><span class="visually-hidden">Ações</span></th></tr></thead>
+            <tbody>
+                @foreach (var user in pending)
+                {
+                    <tr>
+                        <td>@user.FullName</td><td>@user.Function</td><td><code>@user.Login</code></td><td>@Dates.Format(user.CreatedUtc)</td>
+                        <td class="row-actions">
+                            <form method="post" asp-page-handler="Approve" asp-route-id="@user.Id" class="inline-form">
+                                <label class="visually-hidden" for="role-@user.Id">Perfil de @user.FullName</label>
+                                <select id="role-@user.Id" name="role" class="compact-select"><option value="Tecnico">Técnico</option><option value="Administrador">Administrador</option></select>
+                                <button class="button primary compact" type="submit">Aprovar</button>
+                            </form>
+                            <form method="post" asp-page-handler="Reject" asp-route-id="@user.Id" class="inline-form"><button class="button secondary compact danger-button" type="submit">Recusar</button></form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+</section>
+
+<section class="panel" aria-labelledby="create-title">
+    <div class="panel-heading"><span class="section-icon" aria-hidden="true">02</span><div><h2 id="create-title">Criar novo cadastro</h2><p>O acesso fica ativo na hora; a pessoa troca a senha no primeiro login.</p></div></div>
+    <form method="post" asp-page-handler="Create" class="fields-grid">
+        <div class="field full"><label for="new-name">Nome completo <span>*</span></label><input id="new-name" name="fullName" value="@Model.NewFullName" required maxlength="120"></div>
+        <div class="field"><label for="new-function">Função <span>*</span></label><select id="new-function" name="function" required><option value="">Selecione</option>@FunctionOptions(Model.NewFunction)</select></div>
+        <div class="field"><label for="new-role">Permissão <span>*</span></label><select id="new-role" name="role"><option value="Tecnico">Técnico</option><option value="Administrador" selected="@(Model.NewRole == UserRole.Administrador)">Administrador</option></select></div>
+        <div class="field full"><label for="new-login">Login <span>*</span></label><input id="new-login" name="login" value="@Model.NewLogin" required maxlength="60" autocapitalize="none" spellcheck="false" placeholder="primeironome.ultimonome" autocomplete="off"></div>
+        <div class="field"><label for="new-password">Senha temporária <span>*</span></label><input id="new-password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></div>
+        <div class="field"><label for="new-confirmation">Confirmar senha <span>*</span></label><input id="new-confirmation" name="confirmation" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></div>
+        <div class="full"><button class="button primary" type="submit">Criar cadastro</button></div>
+    </form>
+</section>
+
+<section class="panel" aria-labelledby="users-title">
+    <div class="panel-heading"><span class="section-icon" aria-hidden="true">03</span><div><h2 id="users-title">Usuários cadastrados</h2><p>Desativar mantém o histórico e os POPs da pessoa.</p></div><span class="count-badge">@others.Count</span></div>
+    <div class="user-list">
+        @foreach (var user in others)
+        {
+            <article class="user-row @(user.Status == UserStatus.Inativo ? "inactive" : null)" aria-label="@user.FullName">
+                <div class="user-summary">
+                    <div><strong>@user.FullName</strong>@if (user.Id == Model.Me.Id) {<span class="you-tag">você</span>}<small class="cell-note"><code>@user.Login</code> · @user.Function</small></div>
+                    <span class="role-tag">@user.RoleLabel</span>
+                    <span class="status-badge status-@(user.Status == UserStatus.Ativo ? "validado" : "devolvido")">@user.StatusLabel</span>
+                </div>
+                <div class="user-actions">
+                    <details>
+                        <summary>Editar dados</summary>
+                        <form method="post" asp-page-handler="Update" asp-route-id="@user.Id" class="fields-grid">
+                            <div class="field full"><label for="name-@user.Id">Nome completo</label><input id="name-@user.Id" name="fullName" value="@user.FullName" required maxlength="120"></div>
+                            <div class="field"><label for="function-@user.Id">Função</label><select id="function-@user.Id" name="function" required>@FunctionOptions(user.Function)</select></div>
+                            <div class="field"><label for="role-edit-@user.Id">Permissão</label><select id="role-edit-@user.Id" name="role"><option value="Tecnico">Técnico</option><option value="Administrador" selected="@user.IsAdmin">Administrador</option></select></div>
+                            <div class="full"><button class="button secondary compact" type="submit">Salvar dados</button></div>
+                        </form>
+                    </details>
+                    @if (user.Id != Model.Me.Id)
+                    {
+                        <details>
+                            <summary>Redefinir senha</summary>
+                            <form method="post" asp-page-handler="Reset" asp-route-id="@user.Id" class="fields-grid">
+                                <p class="full muted">A senha atual não é exibida. A pessoa deverá trocar a nova senha no próximo acesso.</p>
+                                <div class="field"><label for="reset-@user.Id">Nova senha temporária</label><input id="reset-@user.Id" name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></div>
+                                <div class="field"><label for="reset-confirm-@user.Id">Confirmar</label><input id="reset-confirm-@user.Id" name="confirmation" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></div>
+                                <div class="full"><button class="button secondary compact" type="submit">Redefinir senha</button></div>
+                            </form>
+                        </details>
+                        <form method="post" asp-page-handler="Active" asp-route-id="@user.Id" class="inline-form">
+                            <input type="hidden" name="active" value="@(user.Status == UserStatus.Ativo ? "false" : "true")">
+                            <button class="button secondary compact @(user.Status == UserStatus.Ativo ? "danger-button" : null)" type="submit">@(user.Status == UserStatus.Ativo ? "Desativar" : "Reativar")</button>
+                        </form>
+                    }
+                </div>
+            </article>
+        }
+    </div>
+</section>

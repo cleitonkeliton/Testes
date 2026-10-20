@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Base de conhecimento da CSTIC do HC Recife.">
+    <title>@ViewData["Title"] · CSTIC</title>
+    <link rel="icon" href="~/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true">
+</head>
+<body class="landing-page">
+    <header class="landing-header"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">✚</span><span><strong>CSTIC</strong><small>HC RECIFE</small></span></a><span class="topbar-tag">BASE DE CONHECIMENTO</span></header>
+    <main class="auth-main">
+        @RenderBody()
+    </main>
+    <footer class="landing-footer">CSTIC · Hospital das Clínicas · Recife</footer>
+</body>
+</html>

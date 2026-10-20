@@ -27,12 +27,13 @@ public sealed class DocumentService
     public string CreationDate => _clock.GetUtcNow().ToOffset(TimeSpan.FromHours(-3))
         .ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
 
-    public byte[] CreateWord(KnowledgeArticle article)
+    /// <param name="date">Date of the header; defaults to now (validated versions keep their validation date).</param>
+    public byte[] CreateWord(KnowledgeArticle article, DateTimeOffset? date = null)
     {
         if (ArticleValidator.Validate(article).Count != 0)
             throw new ArgumentException("O documento contém campos inválidos.", nameof(article));
-        var instant = _clock.GetUtcNow();
-        var date = instant.ToOffset(TimeSpan.FromHours(-3)).ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+        var instant = date ?? _clock.GetUtcNow();
+        var headerDate = instant.ToOffset(TimeSpan.FromHours(-3)).ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
         using var input = new MemoryStream(_template, false);
         using var original = new ZipArchive(input, ZipArchiveMode.Read);
         using var output = new MemoryStream();
@@ -55,7 +56,7 @@ public sealed class DocumentService
                 });
                 var xml = XDocument.Load(reader, LoadOptions.PreserveWhitespace);
                 if (entry.FullName == "word/document.xml") FillBody(xml, article);
-                else if (entry.FullName.StartsWith("word/header", StringComparison.Ordinal)) FillHeader(xml, article, date);
+                else if (entry.FullName.StartsWith("word/header", StringComparison.Ordinal)) FillHeader(xml, article, headerDate);
                 else if (entry.FullName.StartsWith("word/footer", StringComparison.Ordinal)) FillFooter(xml, article);
                 else if (entry.FullName == "docProps/core.xml") FillProperties(xml, article, instant);
                 else if (entry.FullName == "word/settings.xml")

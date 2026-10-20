@@ -1,0 +1,116 @@
+@page "/pops/{mode:regex(^(novo|importar)$)}"
+@model EditorModel
+@{
+    ViewData["Title"] = Model.IsImport ? "Importar Word" : Model.Pop is null ? "Criar POP" : "Editar POP";
+    ViewData["Nav"] = Model.IsImport ? "importar" : Model.Pop is null ? "novo" : "pops";
+    ViewData["Mode"] = Model.IsImport ? "importar" : "editar";
+    var pop = Model.Pop;
+}
+@section Head {
+    <script src="~/js/form.js" asp-append-version="true" defer></script>
+}
+@section Sidebar {
+    @if (!Model.IsImport)
+    {
+        <nav class="section-nav" aria-label="Seções do formulário">
+            <a href="#identificacao"><span>01</span> Identificação</a>
+            <a href="#conteudo"><span>02</span> Conteúdo do POP</a>
+            <a href="#procedimento"><span>03</span> Ações e etapas</a>
+        </nav>
+    }
+}
+<section class="hero" aria-labelledby="page-title">
+    <div><p class="eyebrow">PROCEDIMENTO OPERACIONAL PADRÃO</p><h1 id="page-title">@(Model.IsImport ? "Importe um POP existente." : pop is null ? "Documente uma solução." : pop.Status == PopStatus.Validado ? "Revise um POP validado." : "Continue seu POP.")</h1><p class="hero-description">@(Model.IsImport ? "Envie o Word no modelo CSTIC. Ele vira um rascunho seu para revisar e enviar à validação." : "Salve o rascunho quando quiser e envie para validação quando estiver pronto.")</p></div>
+    <a class="button secondary model-link" href="~/modelo-pop.pdf" target="_blank" rel="noopener">Ver modelo CSTIC <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></a>
+</section>
+
+@if (Model.IsImport)
+{
+    <section class="panel upload-panel" aria-labelledby="upload-title">
+        <div class="panel-heading"><span class="section-icon" aria-hidden="true">↑</span><div><h2 id="upload-title">Carregar base existente</h2><p>Os campos serão preenchidos para você revisar e editar.</p></div></div>
+        <p id="upload-help">Envie um <strong>Word .docx no modelo CSTIC, com até 2 MB</strong>. São aceitos documentos gerados aqui e documentos de texto preenchidos no modelo original. PDF e .doc não são aceitos.</p>
+        <form id="import-form" method="post" action="/pops/importar?handler=Import" asp-antiforgery="true" enctype="multipart/form-data">
+            <div class="upload-controls"><div class="field"><label for="existing-file">Arquivo da base de conhecimento</label><input id="existing-file" name="UploadedFile" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" aria-describedby="upload-help"></div><button id="import-document" class="button primary" type="submit">Carregar para revisão</button></div>
+        </form>
+        <div id="import-message" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
+        <p class="privacy-note">O número e a versão do arquivo são mantidos quando válidos e ainda não usados por outro POP. Na validação, a versão sobe automaticamente.</p>
+    </section>
+}
+else
+{
+    @if (pop?.Status == PopStatus.Devolvido && pop.ReturnComment is not null)
+    {
+        <div class="notice warning" role="status"><strong>Ajuste solicitado pelo administrador:</strong> <span class="preview-text">@pop.ReturnComment</span></div>
+    }
+    @if (pop?.Status == PopStatus.Validado)
+    {
+        <div class="notice" role="status">Este POP está validado (versão @pop.Version). Ao salvar uma alteração, começa a revisão para a versão @PopService.NextVersion(pop.Version); a versão validada continua disponível até a nova ser aprovada.</div>
+    }
+    <div id="editor-layout" class="editor-layout">
+        <form id="article-form" class="article-form" method="post" data-max-payload="@ArticleValidator.MaxPayloadLength" data-pop-id="@pop?.Id">
+            <noscript><p class="notice error">Ative o JavaScript do navegador para adicionar etapas e salvar o POP.</p></noscript>
+            <div id="form-message" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
+            <div class="form-meta"><span><span class="required-star">*</span> Campos obrigatórios</span><span>Número, versão e aprovador são definidos na validação</span></div>
+
+            <section id="identificacao" class="panel" aria-labelledby="identificacao-title">
+                <div class="panel-heading"><span class="section-icon" aria-hidden="true">01</span><div><h2 id="identificacao-title">Identificação</h2><p>Os dados que aparecem no cabeçalho do documento.</p></div></div>
+                <div class="fields-grid">
+                    <div class="field"><label for="code">Nº do POP</label><input id="code" value="@(pop?.Code ?? "Automático na validação")" readonly></div>
+                    <div class="field"><label for="version">Versão</label><input id="version" value="@PopService.NextVersion(pop?.Version)" readonly aria-describedby="version-help"><small id="version-help">@(pop?.Version is null ? "Primeira versão validada." : $"Versão atual validada: {pop.Version}.")</small></div>
+                    <div class="field full"><label for="title">Nome da base de conhecimento <span>*</span></label><input id="title" name="title" data-path="title" required maxlength="160" placeholder="Ex.: Limpeza externa de teclado administrativo" autocomplete="off"></div>
+                    <div class="field"><label for="author">Autor</label><input id="author" value="@Model.AuthorName" readonly></div>
+                    <div class="field"><label for="approver">Aprovador</label><input id="approver" value="Definido na validação" readonly></div>
+                    <div class="field"><label for="executor">Executor <span>*</span></label><select id="executor" name="executor" data-path="executor" required><option value="N2 / N1">N2 / N1</option><option value="N1">N1</option><option value="N2">N2</option></select></div>
+                    <div class="field"><label for="creation-date">Data de criação/atualização</label><input id="creation-date" value="@Model.CreationDate" readonly aria-describedby="date-help"><small id="date-help">No Word validado, é a data da validação.</small></div>
+                </div>
+            </section>
+
+            <section id="conteudo" class="panel" aria-labelledby="conteudo-title">
+                <div class="panel-heading"><span class="section-icon" aria-hidden="true">02</span><div><h2 id="conteudo-title">Conteúdo do POP</h2><p>Descreva o contexto antes de partir para a execução.</p></div></div>
+                <div class="field"><label for="objective"><span class="original-number">1.</span> Objetivo <span>*</span></label><textarea id="objective" name="objective" data-path="objective" required maxlength="5000" rows="3" placeholder="Qual problema este procedimento resolve?"></textarea></div>
+                <div class="field"><label for="result"><span class="original-number">2.</span> Resultado <span>*</span></label><textarea id="result" name="result" data-path="result" required maxlength="5000" rows="3" placeholder="O que deve ser alcançado ao concluir as etapas?"></textarea></div>
+                <div class="field"><label for="requirements"><span class="original-number">3.</span> Requisitos <span>*</span></label><textarea id="requirements" name="requirements" data-path="requirements" required maxlength="5000" rows="3" placeholder="Acessos, ferramentas, materiais ou condições necessárias."></textarea><small>Se não houver requisitos, escreva “Não se aplica”.</small></div>
+                <div class="executor-note"><span aria-hidden="true">✓</span><div><strong>4. Executor</strong><p id="executor-summary">N2 / N1, conforme selecionado na identificação.</p></div></div>
+            </section>
+
+            <section id="procedimento" class="panel" aria-labelledby="procedimento-title">
+                <div class="panel-heading"><span class="section-icon" aria-hidden="true">03</span><div><h2 id="procedimento-title">5. Procedimento</h2><p>Agrupe as subetapas em ações principais.</p></div><span id="step-counter" class="count-badge">1 ação</span></div>
+                <div class="steps-help"><span aria-hidden="true">↳</span> Em cada ação, as subetapas recomeçam em 1.1, 1.2, 1.3…</div>
+                <div id="actions-list" aria-label="Ações do procedimento"></div>
+                <button class="button add-step" type="button" id="add-action"><span aria-hidden="true">＋</span> Adicionar ação principal</button>
+            </section>
+
+            <div class="form-actions"><div><strong>Pronto para a validação?</strong><small>O administrador confere o POP e valida ou devolve com orientações.</small></div><div class="form-buttons"><button id="save-draft" class="button secondary" type="button">Salvar rascunho</button><button id="generate-document" class="button primary" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg><span>Enviar para validação</span></button></div></div>
+        </form>
+
+        <aside class="document-aside" aria-label="Resumo do documento">
+            <div class="summary-card"><div class="summary-header"><span class="eyebrow">SEU DOCUMENTO</span><span class="file-type">DOCX</span></div><h3 id="summary-title">Novo procedimento</h3><p id="summary-code" class="summary-code">@(pop?.Code is null ? "Número definido na validação" : $"POP Nº {pop.Code}") · Versão @PopService.NextVersion(pop?.Version)</p><div class="document-thumbnail"><img src="~/img/modelo-pop.png" alt="Modelo CSTIC: cabeçalho e cinco seções em tabelas cinzas" width="920" height="1300"></div><div class="progress-heading"><span>Preenchimento</span><strong id="progress-percentage">0%</strong></div><progress id="form-progress" value="0" max="100" aria-label="Campos obrigatórios preenchidos"></progress><p id="progress-description" class="progress-description">Preencha os campos obrigatórios.</p><div class="summary-stats"><div><span>Ações / subetapas</span><strong id="summary-steps">01 / 01</strong></div><div><span>Executor</span><strong id="summary-executor">N2 / N1</strong></div></div></div>
+            <div class="help-card"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg><div><h3>O mesmo padrão. Menos trabalho.</h3><p>Cabeçalho, seções, numeração e rodapé seguem o modelo que sua equipe utiliza.</p></div></div>
+            <div class="utility-actions"><button type="button" id="download-word">Baixar Word deste conteúdo <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/></svg></button><button type="button" id="fill-example" hidden="@(pop is not null)">Preencher um exemplo <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></button><button type="button" id="clear-form">Limpar formulário</button></div>
+            <p class="privacy-note">Salve o rascunho antes de fechar a página. O Word baixado antes da validação traz Nº e aprovador pendentes.</p>
+        </aside>
+    </div>
+    <script type="application/json" id="initial-data">@Html.Raw(Model.InitialJson)</script>
+}
+
+@section Templates {
+<template id="action-template">
+    <article class="procedure-action">
+        <div class="action-heading"><span class="action-number">1º</span><strong>Ação principal</strong><div class="step-controls"><button type="button" data-action="action-up" class="icon-button" title="Mover ação para cima">↑</button><button type="button" data-action="action-down" class="icon-button" title="Mover ação para baixo">↓</button><button type="button" data-action="remove-action" class="icon-button danger" title="Remover ação">×</button></div></div>
+        <div class="field action-title-field"><label class="action-title-label">Nome da ação <span>*</span></label><input class="action-title" required maxlength="200" placeholder="Ex.: Abrir computador"></div>
+        <div class="action-steps" aria-label="Subetapas desta ação"></div>
+        <button type="button" class="button add-substep" data-action="add-substep"><span aria-hidden="true">＋</span> Adicionar subetapa</button>
+    </article>
+</template>
+<template id="step-template">
+    <article class="procedure-step">
+        <div class="step-heading"><span class="step-number">1.1</span><span class="step-caption">Subetapa</span><div class="step-controls"><button type="button" data-action="up" class="icon-button" title="Mover etapa para cima">↑</button><button type="button" data-action="down" class="icon-button" title="Mover etapa para baixo">↓</button><button type="button" data-action="remove-step" class="icon-button danger" title="Remover etapa">×</button></div></div>
+        <div class="field"><label class="instruction-label">O que fazer <span>*</span></label><textarea class="step-instruction" required maxlength="500" rows="2" placeholder="Ex.: Retirar os parafusos da tampa."></textarea></div>
+        <div class="detail-list"></div>
+        <button type="button" class="detail-add" data-action="add-detail"><span aria-hidden="true">＋</span> Adicionar detalhe em marcador</button>
+    </article>
+</template>
+<template id="detail-template">
+    <div class="detail-row"><span class="bullet-symbol" aria-hidden="true">•</span><div class="field"><label class="detail-label">Detalhe <span class="optional-label">opcional</span></label><textarea class="detail-text" maxlength="2000" rows="2" placeholder="Uma orientação, cuidado ou informação complementar."></textarea></div><button type="button" class="icon-button danger" data-action="remove-detail" title="Remover detalhe">×</button></div>
+</template>
+}

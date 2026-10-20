@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Xml;
 using Cstic.KnowledgeBase.Models;
@@ -7,6 +8,17 @@ namespace Cstic.KnowledgeBase.Services;
 
 public static class ArticleValidator
 {
+    /// <summary>Maximum size of the JSON form sent by the browser to generate a document.</summary>
+    public const int MaxPayloadLength = 180_000;
+    public const string PayloadTooLongMessage = "O POP excede o limite total de 180.000 caracteres. Reduza os textos ou divida o conteúdo em mais de um POP.";
+    // Matches JSON.stringify in the browser: camelCase names and accents kept unescaped.
+    private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    public static int PayloadLength(KnowledgeArticle article) => JsonSerializer.Serialize(article, PayloadOptions).Length;
+
     public static Dictionary<string, string[]> Validate(KnowledgeArticle article)
     {
         var errors = new Dictionary<string, List<string>>();

@@ -1,0 +1,41 @@
+@model KnowledgeArticle
+@* Read-only rendering of the document, following the sections of the CSTIC template. *@
+<article class="pop-preview" aria-label="Conteúdo do POP">
+    <table class="preview-header">
+        <tbody>
+            <tr><th scope="row">Nº</th><td>@Model.Code</td></tr>
+            <tr><th scope="row">Nome</th><td>@Model.Title</td></tr>
+            <tr><th scope="row">Versão</th><td>@Model.Version</td></tr>
+            <tr><th scope="row">Autor</th><td>@Model.Author</td></tr>
+            <tr><th scope="row">Aprovador</th><td>@Model.Approver</td></tr>
+        </tbody>
+    </table>
+    <section><h3>1. Objetivo</h3><p class="preview-text">@Model.Objective</p></section>
+    <section><h3>2. Resultado</h3><p class="preview-text">@Model.Result</p></section>
+    <section><h3>3. Requisitos</h3><p class="preview-text">@Model.Requirements</p></section>
+    <section><h3>4. Executor</h3><p class="preview-text">@Model.Executor</p></section>
+    <section>
+        <h3>5. Procedimento</h3>
+        @for (var i = 0; i < (Model.Actions?.Count ?? 0); i++)
+        {
+            var action = Model.Actions![i];
+            <div class="preview-action">
+                <p class="preview-action-title">@(i + 1)º  @action.Title</p>
+                @for (var j = 0; j < (action.Steps?.Count ?? 0); j++)
+                {
+                    var step = action.Steps![j];
+                    <p class="preview-step"><span>1.@(j + 1)</span> <span class="preview-text">@step.Instruction</span></p>
+                    @if (step.Details?.Count > 0)
+                    {
+                        <ul class="preview-details">
+                            @foreach (var detail in step.Details.Where(detail => !string.IsNullOrWhiteSpace(detail)))
+                            {
+                                <li class="preview-text">@detail</li>
+                            }
+                        </ul>
+                    }
+                }
+            </div>
+        }
+    </section>
+</article>
